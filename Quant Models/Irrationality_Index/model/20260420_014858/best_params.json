@@ -1,0 +1,42 @@
+{
+  "SPY": {
+    "embed_dim": 256,
+    "num_heads": 4,
+    "ff_dim": 512,
+    "num_blocks": 2,
+    "dropout_rate": 0.15000000000000002,
+    "lr": 0.00011097554561103102,
+    "use_learnable_pe": false,
+    "batch_size": 64
+  },
+  "TLT.O": {
+    "embed_dim": 128,
+    "num_heads": 4,
+    "ff_dim": 256,
+    "num_blocks": 2,
+    "dropout_rate": 0.2,
+    "lr": 0.0007892865963079934,
+    "use_learnable_pe": false,
+    "batch_size": 32
+  },
+  "GLD": {
+    "embed_dim": 128,
+    "num_heads": 4,
+    "ff_dim": 512,
+    "num_blocks": 3,
+    "dropout_rate": 0.4,
+    "lr": 0.00016619365681750658,
+    "use_learnable_pe": false,
+    "batch_size": 64
+  },
+  "XLE": {
+    "embed_dim": 128,
+    "num_heads": 8,
+    "ff_dim": 256,
+    "num_blocks": 3,
+    "dropout_rate": 0.30000000000000004,
+    "lr": 0.0002310093735409803,
+    "use_learnable_pe": true,
+    "batch_size": 64
+  }
+}

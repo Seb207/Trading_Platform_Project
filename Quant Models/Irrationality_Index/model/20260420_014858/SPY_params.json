@@ -1,0 +1,10 @@
+{
+  "embed_dim": 256,
+  "num_heads": 4,
+  "ff_dim": 512,
+  "num_blocks": 2,
+  "dropout_rate": 0.15000000000000002,
+  "lr": 0.00011097554561103102,
+  "use_learnable_pe": false,
+  "batch_size": 64
+}
