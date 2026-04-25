@@ -1,132 +1,177 @@
 # Research_LLM: arXiv MCP Server
 
-A specialized local service that acts as a bridge between Large Language Models (LLMs) and the arXiv academic database. Built using the Model Context Protocol (MCP), it empowers AI assistants to autonomously search for papers, extract their full text (prioritizing HTML/Markdown for optimal LLM context), and save them to your local machine organized by research categories.
+A local MCP server that bridges LLMs and the arXiv academic database.
+It lets AI assistants autonomously search, download, and deeply analyze research papers — then generate grounded quant strategy code based on them.
 
 ## Architecture & Design Choices
 
-This project specifically diverges from traditional RAG (Retrieval-Augmented Generation) architectures that rely on chunking and Vector Databases. 
-Instead, it leverages the massive context windows of modern LLMs (like Gemini 1.5 Pro or Claude 3.5 Sonnet) by downloading full papers as clean Markdown files. 
-This allows the LLM to read the entire document at once, preserving the full context, tables, and mathematical formulas without the fragmentation issues common in PDF parsing.
+This project deliberately avoids traditional RAG (chunking + Vector DB) for the core reading workflow.
+Instead, it downloads full papers as clean Markdown and passes them directly into the LLM's context window.
 
-### Key Features
-1. **HTML-First Extraction:** It prioritizes fetching the HTML version of arXiv papers and converts them into pure Markdown (`.md`). This is the most efficient and native format for LLMs to digest.
-2. **PDF Fallback:** If a paper is too old to have an HTML version, it automatically falls back to downloading the traditional PDF.
-3. **Smart Categorization:** Downloads are automatically sorted into subfolders based on their arXiv primary category (e.g., `q-fin.CP`, `cs.AI`).
-4. **MCP Integration:** Fully compatible with MCP clients (like Claude Desktop or VS Code Cline), allowing you to interact with the system entirely through natural language prompts.
-5. **Local Paper Browsing:** The server can list downloaded local papers by category and metadata (`list_local_papers`).
-6. **Local Paper Reading:** The server can read local Markdown papers with truncation/pagination controls (`read_local_paper`).
+**Why full-text over RAG for quant research?**
+- Quant papers have tightly coupled sections (methodology ↔ results ↔ math). Chunking breaks those links.
+- The target workflow is *deep reading of a small, curated set of papers*, not broad retrieval across thousands.
+- Modern LLMs (Claude, Gemini) have 200k+ token windows — enough to hold multiple full papers at once.
 
-## Current Progress (Phase 1 & 2 Completed)
+**When RAG is added (Phase 4):** only paper *abstracts* are embedded, not full text. This gives lightweight topic-based *discovery* across a large local library, after which full papers are read normally.
 
-We have successfully rebuilt the core infrastructure and exposed it as an MCP tool.
+---
 
-### 1. Data Ingestion Core (`arxiv_client.py`)
-- [x] Implemented `search_papers(query, max_results)` to fetch metadata (Title, Authors, Summary, Category) via the arXiv XML API.
-- [x] Implemented `download_paper(arxiv_id, category)` using `requests` and `BeautifulSoup`.
-- [x] Integrated `markdownify` to perfectly convert HTML papers into LLM-readable Markdown.
-- [x] Added automated folder structuring based on research categories (e.g., `../papers/arXiv/[category]/`).
-- [x] Added `list_local_papers(category, limit)` to inspect locally saved papers.
-- [x] Added `read_local_paper(relative_path, max_chars, offset)` for safe local Markdown reading.
+## MCP Tools (9 total)
 
-### 2. MCP Server Layer (`mcp_server.py`)
-- [x] Utilized `FastMCP` to wrap the core python client into a standardized MCP server.
-- [x] Exposed `search_arxiv_papers` tool for AI agents.
-- [x] Exposed `download_arxiv_paper` tool for AI agents.
-- [x] Exposed `list_local_papers` tool for AI agents.
-- [x] Exposed `read_local_paper` tool for AI agents.
-- [x] Set up standard Input/Output (`stdio`) transport for seamless integration with desktop clients.
+| Tool | Phase | Description |
+|---|---|---|
+| `search_arxiv_papers` | 1 | Search arXiv by keyword + optional date range |
+| `download_arxiv_paper` | 1 | Download one paper (HTML→Markdown, PDF fallback) |
+| `list_local_papers` | 1 | List locally saved papers, filterable by category |
+| `read_local_paper` | 1 | Read a local `.md` paper with pagination |
+| `analyze_local_paper` | 2 | Full paper + section map for strategy generation |
+| `bulk_download_papers` | 3 | Download a list of papers in one call |
+| `backfill_metadata` | 3 | Populate `metadata.json` for pre-existing papers |
+| `build_search_index` | 4 | Embed abstracts into ChromaDB for semantic search |
+| `search_local_papers_by_topic` | 4 | Find relevant papers by natural language query |
 
-### 3. Tool Workflow (No RAG / No LangGraph)
-1. Use `search_arxiv_papers` to find candidate papers.
-2. Use `download_arxiv_paper` to save them locally by category.
-3. Use `list_local_papers` to inspect what is available on disk.
-4. Use `read_local_paper` to fetch Markdown content for summarization or idea generation.
+---
 
-> Note: `read_local_paper` currently supports `.md` content reading. For `.pdf`, download works, but text extraction is not enabled yet.
+## Typical Workflows
+
+### 1. Research a topic and generate a quant strategy
+
+```
+"2024년 이후 cross-sectional momentum 논문 5편 찾아서 다운받고,
+방법론이 가장 명확한 논문 기반으로 Python 백테스트 코드 짜줘"
+```
+
+Claude will automatically chain:
+1. `search_arxiv_papers("cross-sectional momentum", date_from="2024-01-01", max_results=5)`
+2. `bulk_download_papers([...ids...], category="q-fin.PM")`
+3. `analyze_local_paper("q-fin.PM/2401.xxxxx.md")`
+4. Generate strategy code grounded in the paper's methodology
+
+### 2. Catch up on recent papers in a category
+
+```
+"q-fin.TR 카테고리에서 2025년 1분기 논문 목록 보여주고 abstract 요약해줘"
+```
+
+### 3. Search your local library by topic (Phase 4)
+
+```
+"로컬에 저장된 논문 중 volatility scaling 다루는 논문 찾아줘"
+```
+
+Claude will use `search_local_papers_by_topic` to find the most relevant papers by semantic similarity, then read them with `analyze_local_paper`.
+
+---
 
 ## Project Structure
 
 ```text
-Trading_Platform_Project/
-│
-├── papers/
-│   └── arXiv/                  # Papers are downloaded here
-│       ├── q-fin.CP/           # E.g., Markdown/PDFs for Computational Finance
-│       └── cs.AI/              # E.g., Markdown/PDFs for Artificial Intelligence
-│
-└── Research_LLM/               # Main Application Directory
-    ├── arxiv_client.py         # The core logic for API calls and HTML parsing
-    ├── mcp_server.py           # The FastMCP server exposing tools to the LLM
-    ├── tests/
-    │   └── test_local_paper_tools.py # Unit tests for local list/read behaviors
-    ├── requirements.txt        # Python dependencies
-    ├── PROJECT_PLAN_HTML_ONLY.md # Historical planning document
-    └── README.md               # This file
+Research_LLM/                       # Project root
+├── arxiv_client.py                 # Core logic: API calls, HTML parsing, metadata, ChromaDB
+├── mcp_server.py                   # FastMCP server — exposes 9 tools to the LLM
+├── tests/
+│   └── test_local_paper_tools.py   # 31 unit tests (all features covered, no network calls)
+├── requirements.txt                # Python dependencies
+└── README.md                       # This file
+
+papers/
+└── arXiv/                          # Downloaded papers
+    ├── q-fin.CP/                   # Organised by arXiv category
+    ├── q-fin.PM/
+    ├── cs.AI/
+    ├── ...
+    ├── metadata.json               # Auto-saved paper metadata (title, abstract, authors, date)
+    └── .chroma/                    # ChromaDB index (created by build_search_index)
 ```
+
+---
 
 ## Setup & Installation
 
-1. Navigate to the project directory:
-   ```bash
-   cd Trading_Platform_Project/Research_LLM
-   ```
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. (Optional) Run unit tests:
-   ```bash
-   cd /Users/ahnsebin/Documents/Personal\ Project/Quant/Trading_Platform_Project
-   python3 -m unittest Research_LLM/tests/test_local_paper_tools.py
-   ```
+### 1. Install dependencies
 
-## How to Connect to an LLM
+```bash
+cd Trading_Platform_Project/Research_LLM
+pip install -r requirements.txt
+```
 
-This MCP server can be connected to any MCP-compatible client. 
+> **Phase 4 only** (semantic search): `chromadb` and `sentence-transformers` are included in `requirements.txt` but only imported when the relevant tools are called. Skip if you don't need local topic search yet.
 
-### Option 1: Claude Desktop (Recommended for Chat)
-Add the following to your `claude_desktop_config.json`:
+### 2. Run unit tests
+
+```bash
+cd Trading_Platform_Project/Research_LLM
+python3 -m pytest tests/ -v
+```
+
+### 3. Connect to Claude Desktop
+
+Add the following to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
     "arxiv-research": {
-      "command": "python",
-      "args": ["/ABSOLUTE_PATH_TO_YOUR_PROJECT/Trading_Platform_Project/Research_LLM/mcp_server.py"]
+      "command": "/opt/anaconda3/bin/python3",
+      "args": ["/ABSOLUTE_PATH/Trading_Platform_Project/Research_LLM/mcp_server.py"]
     }
   }
 }
 ```
 
-### Option 2: VS Code 'Cline' Extension (Recommended for Development)
-Add the exact same JSON block shown above to Cline's `mcp.json` file. This allows you to use Gemini or GPT-4o API to control the tools directly inside VS Code.
+Restart Claude Desktop. A hammer icon (🔨) will appear — click it to verify all 9 tools are loaded.
 
-## Next Steps / Functional Roadmap
+### 4. Connect to VS Code Cline
 
-### Immediate (Priority 1)
-- [ ] Connect this MCP server to a client (Claude Desktop, Cline, or Gemini-compatible MCP client) and validate end-to-end flow:
-  - `search_arxiv_papers` -> `download_arxiv_paper` -> `list_local_papers` -> `read_local_paper`
-- [ ] Create a prompt test set (10-15 prompts) for repeatable checks:
-  - paper search quality
-  - local file read quality
-  - grounded answers with paper evidence
-- [ ] Add short usage examples in this README for common tasks:
-  - "find recent market microstructure papers"
-  - "download top 3 papers and summarize key ideas"
+Add the same JSON block to Cline's `mcp.json`. Works with any API (Gemini, GPT-4o, Claude).
 
-### Short-Term (Priority 2)
-- [ ] Implement `analyze_local_paper(relative_path, question, max_chars)` MCP tool:
-  - reads local `.md`
-  - returns summary + direct evidence snippets
-  - includes possible quant strategy ideas tied to the paper content
-- [ ] Add `analyze_local_paper` unit tests for:
-  - valid markdown analysis
-  - missing file handling
-  - empty/very long question handling
+---
 
-### Integration (Priority 3)
-- [ ] Build a minimal `gemini_cli_runner.py` script to run Gemini with this MCP toolset from terminal.
-- [ ] Add a small command cookbook for Korean/English prompts to speed up manual research workflows.
+## First-Time Setup for Phase 4 (Semantic Search)
 
-### Optional Later (Not Required for Current MVP)
-- [ ] Enable PDF text extraction for `read_local_paper` fallback (for old papers without HTML markdown).
-- [ ] Consider lightweight retrieval indexing only when local paper volume grows significantly.
+If you already have papers downloaded before Phase 4 was added, run these once:
+
+```
+# In Claude Desktop:
+1. backfill_metadata()        — fetch metadata for all existing papers from arXiv API
+2. build_search_index()       — embed abstracts (downloads ~80MB model on first run)
+3. search_local_papers_by_topic("your topic")  — ready to use
+```
+
+New papers downloaded via `download_arxiv_paper` or `bulk_download_papers` are automatically added to `metadata.json`. Re-run `build_search_index` periodically to keep the index fresh.
+
+---
+
+## arXiv q-fin Categories Reference
+
+| Category | Name | Focus |
+|---|---|---|
+| `q-fin.CP` | Computational Finance | Numerical methods, ML/DL models |
+| `q-fin.EC` | Economics | Economic theory, econometrics |
+| `q-fin.GN` | General Finance | Misc. finance topics |
+| `q-fin.MF` | Mathematical Finance | Stochastic calculus, derivatives math |
+| `q-fin.PM` | Portfolio Management | Factor models, asset allocation |
+| `q-fin.PR` | Pricing of Securities | Derivatives pricing |
+| `q-fin.RM` | Risk Management | VaR, CVaR, risk models |
+| `q-fin.ST` | Statistical Finance | Time series, empirical analysis |
+| `q-fin.TR` | Trading & Market Microstructure | Algo trading, order flow |
+
+---
+
+## Roadmap
+
+### Done
+- [x] Date-filtered arXiv search (`date_from` / `date_to`)
+- [x] HTML→Markdown download with nav/footer noise removed
+- [x] `analyze_local_paper` — full paper + section map for strategy generation
+- [x] `bulk_download_papers` — batch download from search results
+- [x] Auto-save metadata on every download
+- [x] `backfill_metadata` — batch API backfill for pre-existing papers
+- [x] `build_search_index` — abstract embedding via sentence-transformers + ChromaDB
+- [x] `search_local_papers_by_topic` — semantic search over local library
+- [x] Claude Desktop MCP connection
+
+### Later
+- [ ] PDF text extraction for `read_local_paper` (for papers without HTML)
+- [ ] Prompt cookbook (common Korean/English research prompts)
