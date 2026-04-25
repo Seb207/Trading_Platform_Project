@@ -2,3 +2,6 @@ mcp
 requests
 beautifulsoup4
 markdownify
+# Phase 4 — semantic search (install when local paper library grows large)
+chromadb
+sentence-transformers
