@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from Research_LLM.arxiv_client import ArxivToolClient
+from arxiv_client import ArxivToolClient
 
 
 SAMPLE_MD = """\
