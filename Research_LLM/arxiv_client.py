@@ -346,21 +346,35 @@ class ArxivToolClient:
 
     def search_papers(
         self,
-        query: str,
+        query: str = "",
         max_results: int = 5,
         date_from: str | None = None,
         date_to: str | None = None,
+        category: str | None = None,
     ) -> list[dict]:
         """
         Search arXiv for papers using the official API.
 
         date_from / date_to accept YYYY-MM-DD or YYYYMMDD format.
+        category uses arXiv cat: syntax (e.g. "q-fin.CP", "cs.AI").
+        query and category can be combined; at least one must be provided.
         """
-        search_query = f"all:{query}"
+        parts = []
+        if query:
+            parts.append(f"all:{query}")
+        if category:
+            parts.append(f"cat:{category}")
+        if not parts:
+            return [{"error": "query or category is required."}]
+
+        search_query = " AND ".join(parts)
 
         if date_from or date_to:
             df = self._normalize_date(date_from) if date_from else "00000000"
-            dt = self._normalize_date(date_to) if date_to else "99991231"
+            # Use today as the upper bound when date_to is omitted.
+            # arXiv silently returns 0 results for far-future dates (e.g. 99991231)
+            # on low-volume categories.
+            dt = self._normalize_date(date_to) if date_to else datetime.now().strftime("%Y%m%d")
             search_query += f" AND submittedDate:[{df}0000 TO {dt}2359]"
 
         params = {

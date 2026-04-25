@@ -11,7 +11,7 @@ from arxiv_client import ArxivToolClient
 mcp = FastMCP("ArxivResearchServer")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOWNLOAD_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "papers", "arXiv"))
+DOWNLOAD_DIR = os.path.abspath(os.path.join(BASE_DIR, "papers", "arXiv"))
 
 arxiv_client = ArxivToolClient(download_dir=DOWNLOAD_DIR)
 
@@ -22,27 +22,30 @@ arxiv_client = ArxivToolClient(download_dir=DOWNLOAD_DIR)
 
 @mcp.tool()
 def search_arxiv_papers(
-    query: str,
+    query: str = "",
     max_results: int = 5,
     date_from: str = "",
     date_to: str = "",
+    category: str = "",
 ) -> str:
     """
-    Search arXiv for research papers based on a query and optional date range.
+    Search arXiv for research papers. At least one of query or category must be provided.
 
     Returns a list of papers including arxiv_id, title, authors, summary, and category.
 
     Args:
-        query: Search keywords (e.g. "momentum factor equity", "transformer time series")
-        max_results: Number of papers to return (default 5, max 50)
+        query: Search keywords (e.g. "momentum factor equity"). Optional if category is set.
+        max_results: Number of papers to return (default 5, max 2000)
         date_from: Start date in YYYY-MM-DD or YYYYMMDD format (optional)
         date_to: End date in YYYY-MM-DD or YYYYMMDD format (optional)
+        category: arXiv category filter (e.g. "q-fin.CP", "q-fin.PM", "cs.AI")
     """
     results = arxiv_client.search_papers(
-        query=query,
+        query=query or "",
         max_results=max_results,
         date_from=date_from or None,
         date_to=date_to or None,
+        category=category or None,
     )
     return json.dumps(results, indent=2, ensure_ascii=False)
 
