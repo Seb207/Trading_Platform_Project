@@ -1,0 +1,28 @@
+# Downloaded papers (large binary/text files, not version controlled)
+papers/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Secrets / config
+*.env
+.env
+config.json

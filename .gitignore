@@ -1,3 +1,33 @@
+# Secrets / API keys
 /Quant Models/refinitiv-data.config.json
+*.env
+.env
+config.json
+
+# Data files (large, not version controlled)
 /Quant Models/Data/Index/1424_daily.csv
+
+# Claude Code worktrees
 /Research_LLM/.claude/
+
+# Downloaded papers
+/Research_LLM/papers/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
