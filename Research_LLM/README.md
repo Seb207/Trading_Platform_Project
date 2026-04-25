@@ -38,8 +38,8 @@ Instead, it downloads full papers as clean Markdown and passes them directly int
 ### 1. Research a topic and generate a quant strategy
 
 ```
-"2024년 이후 cross-sectional momentum 논문 5편 찾아서 다운받고,
-방법론이 가장 명확한 논문 기반으로 Python 백테스트 코드 짜줘"
+"Find 5 cross-sectional momentum papers published after 2024 and download them.
+Then write a Python backtest based on the paper with the clearest methodology."
 ```
 
 Claude will automatically chain:
@@ -51,13 +51,13 @@ Claude will automatically chain:
 ### 2. Catch up on recent papers in a category
 
 ```
-"q-fin.TR 카테고리에서 2025년 1분기 논문 목록 보여주고 abstract 요약해줘"
+"List papers from the q-fin.TR category published in Q1 2025 and summarize their abstracts."
 ```
 
 ### 3. Search your local library by topic (Phase 4)
 
 ```
-"로컬에 저장된 논문 중 volatility scaling 다루는 논문 찾아줘"
+"Find papers in my local library that cover volatility scaling."
 ```
 
 Claude will use `search_local_papers_by_topic` to find the most relevant papers by semantic similarity, then read them with `analyze_local_paper`.
@@ -174,4 +174,4 @@ New papers downloaded via `download_arxiv_paper` or `bulk_download_papers` are a
 
 ### Later
 - [ ] PDF text extraction for `read_local_paper` (for papers without HTML)
-- [ ] Prompt cookbook (common Korean/English research prompts)
+- [ ] Prompt cookbook (common research prompt examples)
