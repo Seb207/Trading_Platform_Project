@@ -2,7 +2,9 @@ import json
 import os
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -14,6 +16,12 @@ from markdownify import markdownify as md
 
 
 class ArxivToolClient:
+    # Minimum seconds between consecutive arXiv API calls (arXiv policy: ~3s)
+    _API_MIN_INTERVAL: float = 3.0
+    # Retry settings for 429 / 503 responses
+    _API_MAX_RETRIES: int = 3
+    _API_BASE_DELAY:  float = 30.0   # 30s → 60s → give up
+
     def __init__(self, download_dir: str):
         self.download_dir = download_dir
         if not os.path.exists(self.download_dir):
@@ -22,10 +30,44 @@ class ArxivToolClient:
         self.api_url = "http://export.arxiv.org/api/query"
         self.html_url_base = "https://arxiv.org/html"
         self.pdf_url_base = "https://arxiv.org/pdf"
+        self._last_api_call: float = 0.0   # timestamp of the last arXiv API call
 
     # ==================================================================
     # Internal helpers
     # ==================================================================
+
+    def _arxiv_api_call(self, url: str) -> str:
+        """
+        Fetch a URL from the arXiv API with:
+          - rate limiting  (min 3 s between calls)
+          - exponential-backoff retry on 429 / 503
+        Returns raw response text.  Raises on permanent failure.
+        """
+        for attempt in range(self._API_MAX_RETRIES):
+            # ── rate limit: ensure minimum gap between calls ──────────
+            elapsed = time.time() - self._last_api_call
+            if elapsed < self._API_MIN_INTERVAL:
+                time.sleep(self._API_MIN_INTERVAL - elapsed)
+
+            self._last_api_call = time.time()
+
+            try:
+                with urllib.request.urlopen(url, timeout=30) as response:
+                    return response.read().decode("utf-8")
+
+            except urllib.error.HTTPError as exc:
+                if exc.code in (429, 503) and attempt < self._API_MAX_RETRIES - 1:
+                    wait = self._API_BASE_DELAY * (2 ** attempt)
+                    print(
+                        f"[arXiv] HTTP {exc.code} — "
+                        f"waiting {wait:.0f}s before retry "
+                        f"({attempt + 1}/{self._API_MAX_RETRIES - 1})…"
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+
+        raise RuntimeError("arXiv API: max retries exceeded")
 
     def _safe_resolve_local_path(self, relative_path: str) -> Path:
         """Resolve a user-provided local path safely under download_dir."""
@@ -138,7 +180,7 @@ class ArxivToolClient:
         chroma_dir.mkdir(parents=True, exist_ok=True)
 
         client = chromadb.PersistentClient(path=str(chroma_dir))
-        ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+        ef = SentenceTransformerEmbeddingFunction(model_name="BAAI/bge-base-en-v1.5")
 
         return client.get_or_create_collection(
             name="arxiv_papers",
@@ -161,7 +203,7 @@ class ArxivToolClient:
         chroma_dir.mkdir(parents=True, exist_ok=True)
 
         client = chromadb.PersistentClient(path=str(chroma_dir))
-        ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+        ef = SentenceTransformerEmbeddingFunction(model_name="BAAI/bge-base-en-v1.5")
 
         return client.get_or_create_collection(
             name="paper_sections",
@@ -360,8 +402,7 @@ class ArxivToolClient:
         url = f"{self.api_url}?{urllib.parse.urlencode(params)}"
 
         try:
-            with urllib.request.urlopen(url) as response:
-                xml_data = response.read().decode("utf-8")
+            xml_data = self._arxiv_api_call(url)
         except Exception as e:
             return [{"error": f"API request failed: {str(e)}"}]
 
@@ -410,8 +451,7 @@ class ArxivToolClient:
         url = f"{self.api_url}?{urllib.parse.urlencode(params)}"
 
         try:
-            with urllib.request.urlopen(url) as response:
-                xml_data = response.read().decode("utf-8")
+            xml_data = self._arxiv_api_call(url)
         except Exception as e:
             return [{"error": f"Failed to fetch data from arXiv API: {str(e)}"}]
 

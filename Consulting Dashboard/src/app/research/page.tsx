@@ -6,6 +6,7 @@ import SearchBar from "@/components/research/SearchBar";
 import PaperTable from "@/components/research/PaperTable";
 import Badge from "@/components/ui/Badge";
 import ChatPanel from "@/components/chat/ChatPanel";
+import DownloadPanel from "@/components/research/DownloadPanel";
 import { listPapers, searchAbstract, searchSections, searchArxiv } from "@/lib/api";
 import type { Paper, SearchMode } from "@/lib/types";
 
@@ -57,7 +58,7 @@ function EmptyState({ reason }: { reason: EmptyReason }) {
   );
 }
 
-// ── Left panel ─────────────────────────────────────────────────────────
+// ── Paper Library tab ──────────────────────────────────────────────────
 function PaperLibrary({
   selected,
   onSelect,
@@ -82,7 +83,6 @@ function PaperLibrary({
 
   const handleSearch = useCallback(
     async (query: string, mode: SearchMode, category: string) => {
-      // Section needs query — SearchBar guards this but double-check
       if (mode === "section" && !query) {
         setEmptyReason("section-needs-query");
         setPapers([]);
@@ -100,7 +100,6 @@ function PaperLibrary({
             setPapers(r.results);
             if (r.results.length === 0) setEmptyReason("no-results");
           } else {
-            // No query → list (filtered by category)
             const r = await listPapers(category, 200);
             setPapers(r.papers);
             if (r.papers.length === 0) setEmptyReason("no-results");
@@ -109,13 +108,13 @@ function PaperLibrary({
         } else if (mode === "section") {
           const r = await searchSections({ query, category, nResults: 30 });
           const asPapers: Paper[] = r.results.map((s) => ({
-            arxiv_id:        s.arxiv_id,
-            title:           `[${s.section_name}]  ${s.paper_title}`,
-            category:        s.category,
-            published:       "",
-            abstract:        s.preview,
+            arxiv_id:         s.arxiv_id,
+            title:            `[${s.section_name}]  ${s.paper_title}`,
+            category:         s.category,
+            published:        "",
+            abstract:         s.preview,
             similarity_score: s.similarity_score,
-            relative_path:   s.relative_path,
+            relative_path:    s.relative_path,
           }));
           setPapers(asPapers);
           if (asPapers.length === 0) setEmptyReason("no-results");
@@ -127,10 +126,9 @@ function PaperLibrary({
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Search failed";
-        // Friendlier message for rate limiting
         setError(
-          msg.includes("429")
-            ? "arXiv API 일시 제한 (429) — 잠시 후 다시 시도하세요."
+          msg.includes("429") || msg.includes("503") || msg.includes("502")
+            ? "arXiv API 일시 제한 — 잠시 후 다시 시도하세요."
             : msg,
         );
       } finally {
@@ -140,20 +138,12 @@ function PaperLibrary({
     [],
   );
 
-  const showEmpty = !loading && emptyReason !== null;
-  const showTable = !loading && emptyReason === null && papers.length > 0;
+  const showEmpty    = !loading && emptyReason !== null;
+  const showTable    = !loading && emptyReason === null && papers.length > 0;
   const showSkeleton = loading && papers.length === 0;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-border flex-shrink-0">
-        <span className="font-mono text-[11px] text-text font-medium tracking-wide uppercase">
-          Paper Library
-        </span>
-        <StatusBadges />
-      </div>
-
       {/* Search + filters */}
       <div className="flex-shrink-0">
         <SearchBar onSearch={handleSearch} loading={loading} />
@@ -203,12 +193,63 @@ function PaperLibrary({
   );
 }
 
+// ── Left panel (tabbed) ─────────────────────────────────────────────────
+type LeftTab = "library" | "download";
+
+function LeftPanel({
+  selected,
+  onSelect,
+}: {
+  selected: Paper | null;
+  onSelect: (p: Paper) => void;
+}) {
+  const [tab, setTab] = useState<LeftTab>("library");
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header with tab bar */}
+      <div className="flex items-center border-b border-border flex-shrink-0">
+        <div className="flex flex-1">
+          {(["library", "download"] as LeftTab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={[
+                "flex-1 py-3 font-mono text-[10px] tracking-wide uppercase transition-colors duration-100 border-b-2",
+                tab === t
+                  ? "text-accent border-accent"
+                  : "text-text-dim border-transparent hover:text-text",
+              ].join(" ")}
+            >
+              {t === "library" ? "Paper Library" : "Download"}
+            </button>
+          ))}
+        </div>
+        {tab === "library" && (
+          <div className="pr-4">
+            <StatusBadges />
+          </div>
+        )}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {tab === "library" ? (
+          <PaperLibrary selected={selected} onSelect={onSelect} />
+        ) : (
+          <DownloadPanel />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────
 export default function ResearchPage() {
   const [selected, setSelected] = useState<Paper | null>(null);
   return (
     <SplitPanel
-      left={<PaperLibrary selected={selected} onSelect={setSelected} />}
+      left={<LeftPanel selected={selected} onSelect={setSelected} />}
       right={<ChatPanel selectedPaper={selected} />}
     />
   );

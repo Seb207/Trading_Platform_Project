@@ -5,7 +5,17 @@ import FilterChip from "@/components/ui/FilterChip";
 import ToggleGroup from "@/components/ui/ToggleGroup";
 import type { SearchMode } from "@/lib/types";
 
-const CATEGORIES = ["q-fin.PM", "q-fin.TR", "q-fin.ST", "q-fin.CP", "q-fin.RM", "cs.AI"];
+// All categories present in the local DB (sorted by paper count desc)
+const CATEGORIES = [
+  "q-fin.RM",  // 111편
+  "q-fin.MF",  // 105편
+  "q-fin.CP",  //  96편
+  "q-fin.ST",  //  90편
+  "q-fin.PM",  //  84편
+  "q-fin.TR",  //  62편
+  "q-fin.GN",  //  46편
+  "q-fin.PR",  //  36편
+];
 
 const MODE_OPTIONS: { value: SearchMode; label: string }[] = [
   { value: "abstract", label: "Abstract" },
