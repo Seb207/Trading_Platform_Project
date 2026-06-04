@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mockup-server",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "/Users/ahnsebin/Documents/Personal Project/Quant/Trading_Platform_Project/Consulting Dashboard/mockups"],
+      "port": 8765
+    }
+  ]
+}

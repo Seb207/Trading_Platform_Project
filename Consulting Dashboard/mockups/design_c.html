@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design C — Bloomberg Pro</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg:     #090c10;
+    --bg2:    #0d1117;
+    --bg3:    #161b22;
+    --bg4:    #1c2230;
+    --border: #21262d;
+    --border2:#2d333b;
+    --text:   #c9d1d9;
+    --text-dim:#586069;
+    --text-mid:#8b949e;
+    --orange: #f78166;
+    --blue:   #58a6ff;
+    --blue-dim: rgba(88,166,255,0.12);
+    --teal:   #39d353;
+    --teal-dim: rgba(57,211,83,0.1);
+    --yellow: #d29922;
+    --yellow-dim: rgba(210,153,34,0.12);
+    --red:    #f85149;
+    --white:  #f0f6fc;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: 'IBM Plex Sans', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+
+  /* ── Topbar ── */
+  .topbar {
+    display:flex; align-items:center; height: 40px; padding: 0 16px;
+    background: var(--bg2); border-bottom: 1px solid var(--border);
+    gap: 0; flex-shrink:0;
+  }
+  .logo { font-family:'IBM Plex Mono',monospace; font-size:13px; font-weight:500; color:var(--orange); padding-right:16px; border-right:1px solid var(--border); margin-right:4px; letter-spacing:1px; }
+
+  .top-tabs { display:flex; height:100%; }
+  .top-tab { display:flex; align-items:center; gap:6px; padding: 0 16px; font-size:12px; color: var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; height:100%; font-weight:500; white-space:nowrap; transition: color 0.1s; }
+  .top-tab:hover { color: var(--text); border-bottom-color: var(--border2); }
+  .top-tab.active { color: var(--white); border-bottom-color: var(--orange); background: rgba(247,129,102,0.05); }
+  .top-tab .ico { font-size:13px; }
+  .top-tab .count { font-family:'IBM Plex Mono',monospace; font-size:9px; padding:1px 5px; border-radius:3px; background:rgba(247,129,102,0.15); color:var(--orange); }
+
+  .topbar-right { margin-left:auto; display:flex; align-items:center; gap:12px; }
+  .status-pill { display:flex; align-items:center; gap:6px; padding: 4px 10px; border:1px solid var(--border); border-radius:4px; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-mid); }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--teal); box-shadow:0 0 4px var(--teal); }
+
+  /* ── Sub header ── */
+  .subheader { display:flex; align-items:center; padding:0 16px; height:36px; background:var(--bg2); border-bottom:1px solid var(--border); gap:16px; flex-shrink:0; }
+  .subheader-title { font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-dim); letter-spacing:0.5px; }
+  .subheader-title strong { color:var(--text); }
+  .divv { width:1px; height:16px; background:var(--border); }
+  .sub-action { font-size:11px; color:var(--text-dim); cursor:pointer; padding: 3px 8px; border:1px solid transparent; border-radius:3px; }
+  .sub-action:hover { border-color:var(--border); color:var(--text); }
+  .sub-action.primary { color:var(--orange); border-color:rgba(247,129,102,0.3); }
+
+  /* ── Layout ── */
+  .layout { flex:1; display:flex; overflow:hidden; }
+
+  /* ── Left ── */
+  .panel-left { flex:1; display:flex; flex-direction:column; overflow:hidden; border-right:1px solid var(--border); }
+
+  /* Stats bar */
+  .statsbar { display:flex; border-bottom:1px solid var(--border); }
+  .sstat { flex:1; padding: 10px 16px; border-right:1px solid var(--border); }
+  .sstat:last-child { border-right:none; }
+  .sstat-label { font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--text-dim); letter-spacing:1px; text-transform:uppercase; }
+  .sstat-val { font-family:'IBM Plex Mono',monospace; font-size:18px; font-weight:500; margin-top:3px; }
+  .sstat-sub { font-size:10px; color:var(--text-dim); margin-top:1px; }
+
+  /* toolbar */
+  .toolbar { display:flex; align-items:center; gap:8px; padding: 8px 16px; border-bottom:1px solid var(--border); background:var(--bg2); flex-wrap:wrap; }
+  .tinput { background:var(--bg3); border:1px solid var(--border); border-radius:4px; padding:6px 12px; color:var(--text); font-size:12px; outline:none; flex:1; min-width:200px; font-family:'IBM Plex Sans',sans-serif; }
+  .tinput:focus { border-color:var(--blue); }
+  .tinput::placeholder { color:var(--text-dim); }
+  .tbtn { padding:6px 14px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .tbtn-blue { background:var(--blue); color:#000; border:none; }
+  .tbtn-ghost { background:transparent; border:1px solid var(--border); color:var(--text-mid); }
+  .tbtn-ghost:hover { border-color:var(--blue); color:var(--blue); }
+
+  /* Mode toggle */
+  .toggle-group { display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .tgl { padding: 5px 12px; font-size:11px; cursor:pointer; color:var(--text-dim); background:transparent; border:none; font-family:'IBM Plex Mono',monospace; }
+  .tgl.on { background:var(--blue); color:#000; font-weight:600; }
+
+  /* filter bar */
+  .filterbar { display:flex; align-items:center; gap:6px; padding: 6px 16px; border-bottom:1px solid var(--border); font-size:11px; }
+  .flabel { color:var(--text-dim); font-family:'IBM Plex Mono',monospace; font-size:10px; }
+  .ftag { padding: 2px 8px; border:1px solid var(--border); border-radius:3px; color:var(--text-mid); cursor:pointer; font-family:'IBM Plex Mono',monospace; font-size:10px; }
+  .ftag.on { border-color:var(--blue); color:var(--blue); background:var(--blue-dim); }
+
+  /* Table */
+  .table-section { flex:1; overflow-y:auto; }
+  .gt { width:100%; border-collapse:collapse; }
+  .gt thead th { padding:8px 16px; text-align:left; font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--text-dim); letter-spacing:1.2px; text-transform:uppercase; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg2); font-weight:400; }
+  .gt tbody tr { border-bottom:1px solid rgba(33,38,45,0.6); cursor:pointer; transition:background 0.08s; }
+  .gt tbody tr:hover { background:var(--bg3); }
+  .gt tbody tr.selected-row { background:var(--blue-dim); border-left:2px solid var(--blue); }
+  .gt td { padding:9px 16px; vertical-align:top; }
+  .gid { font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--blue); }
+  .gtitle { font-size:12px; color:var(--text); line-height:1.45; }
+  .gtitle b { color:var(--orange); font-weight:500; }
+  .gtag { display:inline-block; padding:1px 6px; border-radius:3px; font-family:'IBM Plex Mono',monospace; font-size:9px; font-weight:500; }
+  .tag-pm { background:var(--teal-dim); color:var(--teal); }
+  .tag-tr { background:rgba(247,129,102,0.12); color:var(--orange); }
+  .tag-st { background:var(--blue-dim); color:var(--blue); }
+  .tag-cp { background:var(--yellow-dim); color:var(--yellow); }
+  .gscore { font-family:'IBM Plex Mono',monospace; font-size:12px; }
+  .gdate { font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-dim); }
+
+  /* ── Right: Chat ── */
+  .panel-right { width:380px; display:flex; flex-direction:column; background:var(--bg2); flex-shrink:0; }
+  .right-tabs { display:flex; border-bottom:1px solid var(--border); }
+  .rtab { flex:1; padding:9px 4px; text-align:center; font-size:11px; font-weight:500; font-family:'IBM Plex Mono',monospace; color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; }
+  .rtab.on { color:var(--white); border-bottom-color:var(--orange); }
+
+  .model-bar { display:flex; align-items:center; justify-content:space-between; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--bg); }
+  .model-info { display:flex; align-items:center; gap:8px; font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-mid); }
+  .model-name { color:var(--white); font-weight:500; }
+  .switch-link { font-size:10px; color:var(--blue); cursor:pointer; text-decoration:underline; font-family:'IBM Plex Mono',monospace; }
+
+  .msgs { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .m { display:flex; gap:10px; }
+  .m-av { width:28px; height:28px; border-radius:6px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; font-family:'IBM Plex Mono',monospace; margin-top:2px; }
+  .av-u { background:#1c2a1c; color:var(--teal); border:1px solid rgba(57,211,83,0.3); }
+  .av-ai { background:#1c1c2a; color:var(--blue); border:1px solid rgba(88,166,255,0.3); }
+  .m-content { flex:1; }
+  .m-meta { display:flex; align-items:baseline; gap:8px; margin-bottom:5px; }
+  .m-who { font-size:11px; font-weight:600; }
+  .m-ts { font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--text-dim); }
+  .m-text { font-size:12px; line-height:1.65; color:var(--text); padding:9px 12px; background:var(--bg3); border:1px solid var(--border); border-radius:6px; }
+  .m-text code { font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--orange); background:rgba(247,129,102,0.1); padding:1px 5px; border-radius:3px; }
+  .m-text pre { font-family:'IBM Plex Mono',monospace; font-size:10px; background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:10px; margin-top:8px; color:var(--teal); overflow-x:auto; }
+
+  .input-zone { padding:12px 14px; border-top:1px solid var(--border); }
+  .ibox { background:var(--bg3); border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .ibox textarea { width:100%; background:transparent; border:none; padding:10px 12px; color:var(--text); font-size:12px; resize:none; outline:none; font-family:'IBM Plex Sans',sans-serif; display:block; }
+  .ibox-footer { display:flex; justify-content:space-between; align-items:center; padding:6px 10px; border-top:1px solid var(--border); }
+  .ibox-hint { font-family:'IBM Plex Mono',monospace; font-size:9px; color:var(--text-dim); }
+  .isend { padding:5px 14px; background:var(--orange); color:#000; border:none; border-radius:4px; font-size:11px; font-weight:700; cursor:pointer; }
+
+  ::-webkit-scrollbar { width:4px; }
+  ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+</style>
+</head>
+<body>
+
+<!-- Topbar with category tabs -->
+<div class="topbar">
+  <div class="logo">QR</div>
+  <div class="top-tabs">
+    <div class="top-tab active"><span class="ico">🔬</span> RESEARCH LLM <span class="count">554</span></div>
+    <div class="top-tab"><span class="ico">🌊</span> MARKET REGIME</div>
+    <div class="top-tab"><span class="ico">📊</span> PORTFOLIO</div>
+    <div class="top-tab"><span class="ico">⚗️</span> FACTOR RESEARCH</div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-pill">
+      <div class="status-dot"></div>
+      claude-opus-4-5
+    </div>
+  </div>
+</div>
+
+<!-- Sub-header -->
+<div class="subheader">
+  <div class="subheader-title">RESEARCH LLM <strong>/ Paper Library</strong></div>
+  <div class="divv"></div>
+  <div class="sub-action">Download Papers</div>
+  <div class="sub-action">Backfill Metadata</div>
+  <div class="sub-action primary">⬆ Rebuild Index</div>
+  <div style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-dim)">
+    554 papers · 10,086 sections · 456 indexed
+  </div>
+</div>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Left -->
+  <div class="panel-left">
+    <!-- Stats bar -->
+    <div class="statsbar">
+      <div class="sstat">
+        <div class="sstat-label">Papers</div>
+        <div class="sstat-val" style="color:var(--orange)">554</div>
+        <div class="sstat-sub">8 categories</div>
+      </div>
+      <div class="sstat">
+        <div class="sstat-label">Sections</div>
+        <div class="sstat-val" style="color:var(--blue)">10,086</div>
+        <div class="sstat-sub">section index</div>
+      </div>
+      <div class="sstat">
+        <div class="sstat-label">Metadata</div>
+        <div class="sstat-val" style="color:var(--teal)">456</div>
+        <div class="sstat-sub">abstract index</div>
+      </div>
+      <div class="sstat">
+        <div class="sstat-label">Latest</div>
+        <div class="sstat-val" style="color:var(--text);font-size:12px;margin-top:6px">2026-04</div>
+        <div class="sstat-sub">most recent download</div>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <input class="tinput" type="text" placeholder="Search papers by topic... (e.g. 'cross-sectional momentum factor')">
+      <button class="tbtn tbtn-blue">Search</button>
+      <div class="toggle-group">
+        <div class="tgl on">Abstract</div>
+        <div class="tgl">Section</div>
+        <div class="tgl">arXiv</div>
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div class="filterbar">
+      <span class="flabel">CATEGORY:</span>
+      <div class="ftag on">All</div>
+      <div class="ftag">q-fin.PM</div>
+      <div class="ftag">q-fin.TR</div>
+      <div class="ftag">q-fin.ST</div>
+      <div class="ftag">q-fin.CP</div>
+      <div class="ftag">q-fin.RM</div>
+      <div class="ftag">cs.AI</div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-section">
+      <table class="gt">
+        <thead>
+          <tr>
+            <th>ArXiv ID</th>
+            <th>Title</th>
+            <th>Category</th>
+            <th>Score</th>
+            <th>Published</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="selected-row">
+            <td><div class="gid">2603.01820</div></td>
+            <td><div class="gtitle">Deep Learning for Financial Time Series: <b>Large-Scale Benchmark</b> of Risk-Adjusted Performance</div></td>
+            <td><span class="gtag tag-tr">q-fin.TR</span></td>
+            <td><span class="gscore" style="color:var(--orange)">0.591</span></td>
+            <td><span class="gdate">2026-03-02</span></td>
+          </tr>
+          <tr>
+            <td><div class="gid">2603.18107</div></td>
+            <td><div class="gtitle">ARTEMIS: Neuro Symbolic Framework for Economically Constrained <b>Market Dynamics</b></div></td>
+            <td><span class="gtag tag-st">q-fin.ST</span></td>
+            <td><span class="gscore" style="color:var(--orange)">0.590</span></td>
+            <td><span class="gdate">2026-03-18</span></td>
+          </tr>
+          <tr>
+            <td><div class="gid">2603.19288</div></td>
+            <td><div class="gtitle">Joint Return and Risk Modeling with <b>Deep Neural Networks</b> for Portfolio Construction</div></td>
+            <td><span class="gtag tag-pm">q-fin.PM</span></td>
+            <td><span class="gscore" style="color:var(--orange)">0.558</span></td>
+            <td><span class="gdate">2026-03-09</span></td>
+          </tr>
+          <tr>
+            <td><div class="gid">2602.17098</div></td>
+            <td><div class="gtitle">Deep <b>Reinforcement Learning</b> for Optimal Portfolio Allocation vs Mean-Variance Optimization</div></td>
+            <td><span class="gtag tag-pm">q-fin.PM</span></td>
+            <td><span class="gscore" style="color:var(--orange)">0.557</span></td>
+            <td><span class="gdate">2026-02-19</span></td>
+          </tr>
+          <tr>
+            <td><div class="gid">2601.19504</div></td>
+            <td><div class="gtitle">Generating Alpha: Hybrid AI-Driven Trading System — <b>Regime-Adaptive</b> Equity Strategies</div></td>
+            <td><span class="gtag tag-cp">q-fin.CP</span></td>
+            <td><span class="gscore" style="color:var(--orange)">0.528</span></td>
+            <td><span class="gdate">2026-01-27</span></td>
+          </tr>
+          <tr>
+            <td><div class="gid">2603.16886</div></td>
+            <td><div class="gtitle">Controlled Comparison of <b>DL Architectures</b> for Multi-Horizon Financial Forecasting: 918 Experiments</div></td>
+            <td><span class="gtag tag-st">q-fin.ST</span></td>
+            <td><span class="gscore" style="color:var(--orange)">0.560</span></td>
+            <td><span class="gdate">2026-02-27</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Right: Chat -->
+  <div class="panel-right">
+    <div class="right-tabs">
+      <div class="rtab on">CHAT</div>
+      <div class="rtab">VIEWER</div>
+      <div class="rtab">STRATEGY</div>
+    </div>
+    <div class="model-bar">
+      <div class="model-info">
+        <div class="status-dot" style="width:5px;height:5px"></div>
+        MODEL: <span class="model-name">claude-opus-4-5</span>
+      </div>
+      <span class="switch-link">switch provider</span>
+    </div>
+    <div class="msgs">
+      <div class="m">
+        <div class="m-av av-u">U</div>
+        <div class="m-content">
+          <div class="m-meta">
+            <span class="m-who" style="color:var(--teal)">You</span>
+            <span class="m-ts">04:02</span>
+          </div>
+          <div class="m-text">BAB 팩터 포트폴리오 구성 방법 알려줘</div>
+        </div>
+      </div>
+      <div class="m">
+        <div class="m-av av-ai">AI</div>
+        <div class="m-content">
+          <div class="m-meta">
+            <span class="m-who" style="color:var(--blue)">Research LLM</span>
+            <span class="m-ts">04:02</span>
+          </div>
+          <div class="m-text">
+            <code>search_sections_by_topic</code> → 3편 섹션 검색 완료<br><br>
+            <strong>BAB Factor</strong> 포트폴리오 구성:<br><br>
+            1. Rolling 1Y beta 계산<br>
+            2. beta 상/하위 20% 분류<br>
+            3. 저베타 롱 / 고베타 숏<br>
+            4. Dollar-neutral 유지<br>
+            <pre>bab = low_beta_port - high_beta_port
+# ref: 2603.19288 §3.2</pre>
+          </div>
+        </div>
+      </div>
+      <div class="m">
+        <div class="m-av av-u">U</div>
+        <div class="m-content">
+          <div class="m-meta">
+            <span class="m-who" style="color:var(--teal)">You</span>
+            <span class="m-ts">04:03</span>
+          </div>
+          <div class="m-text">Python 전체 코드 짜줘</div>
+        </div>
+      </div>
+      <div class="m">
+        <div class="m-av av-ai">AI</div>
+        <div class="m-content">
+          <div class="m-meta">
+            <span class="m-who" style="color:var(--blue)">Research LLM</span>
+            <span class="m-ts">04:03</span>
+          </div>
+          <div class="m-text"><code>2603.19288</code> Methodology § 기반으로 생성 중...</div>
+        </div>
+      </div>
+    </div>
+    <div class="input-zone">
+      <div class="ibox">
+        <textarea rows="3" placeholder="Ask about papers or request strategy code..."></textarea>
+        <div class="ibox-footer">
+          <span class="ibox-hint">Enter to send · Shift+Enter for newline</span>
+          <button class="isend">SEND ↑</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

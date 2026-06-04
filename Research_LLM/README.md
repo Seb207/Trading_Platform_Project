@@ -13,11 +13,15 @@ Instead, it downloads full papers as clean Markdown and passes them directly int
 - The target workflow is *deep reading of a small, curated set of papers*, not broad retrieval across thousands.
 - Modern LLMs (Claude, Gemini) have 200k+ token windows — enough to hold multiple full papers at once.
 
-**When RAG is added (Phase 4):** only paper *abstracts* are embedded, not full text. This gives lightweight topic-based *discovery* across a large local library, after which full papers are read normally.
+**Two-tier retrieval strategy (Phase 4):**
+- **Abstract-level** (`build_search_index` / `search_local_papers_by_topic`): broad topic discovery across all papers — no LLM needed, just vector similarity on abstracts.
+- **Section-level** (`build_section_index` / `search_sections_by_topic`): pinpoint the exact section (Methodology, Results, etc.) across all papers — enables targeted reading without loading full papers.
+
+This two-tier approach scales to thousands of papers while minimising LLM token usage.
 
 ---
 
-## MCP Tools (9 total)
+## MCP Tools (11 total)
 
 | Tool | Phase | Description |
 |---|---|---|
@@ -28,8 +32,10 @@ Instead, it downloads full papers as clean Markdown and passes them directly int
 | `analyze_local_paper` | 2 | Full paper + section map for strategy generation |
 | `bulk_download_papers` | 3 | Download a list of papers in one call |
 | `backfill_metadata` | 3 | Populate `metadata.json` for pre-existing papers |
-| `build_search_index` | 4 | Embed abstracts into ChromaDB for semantic search |
+| `build_search_index` | 4 | Embed abstracts into ChromaDB (`arxiv_papers` collection) |
 | `search_local_papers_by_topic` | 4 | Find relevant papers by natural language query |
+| `build_section_index` | 4 | Embed each section separately into ChromaDB (`paper_sections` collection) |
+| `search_sections_by_topic` | 4 | Find relevant sections (Methodology, Results, etc.) across all papers |
 
 ---
 
@@ -54,13 +60,29 @@ Claude will automatically chain:
 "List papers from the q-fin.TR category published in Q1 2025 and summarize their abstracts."
 ```
 
-### 3. Search your local library by topic (Phase 4)
+### 3. Token-efficient deep research (Phase 4 — recommended for large libraries)
 
 ```
-"Find papers in my local library that cover volatility scaling."
+"Find how BAB factor portfolios are constructed across papers in my local library."
 ```
 
-Claude will use `search_local_papers_by_topic` to find the most relevant papers by semantic similarity, then read them with `analyze_local_paper`.
+Claude will chain all three retrieval tiers:
+1. `search_local_papers_by_topic("betting against beta")` → Top 5 papers by abstract similarity
+2. `search_sections_by_topic("BAB portfolio construction", section_filter="method")` → Pinpoint Methodology sections
+3. `read_local_paper(relative_path, offset=...)` → Read only the relevant section
+4. Generate or compare implementations
+
+**Token cost:** ~5,000–15,000 tokens vs ~200,000+ tokens for full-paper loading.
+
+### 4. Search within a single paper
+
+```
+"In paper 2401.12345, find the section that explains the rebalancing frequency."
+```
+
+```
+search_sections_by_topic("rebalancing frequency", arxiv_id="2401.12345")
+```
 
 ---
 
@@ -69,9 +91,9 @@ Claude will use `search_local_papers_by_topic` to find the most relevant papers 
 ```text
 Research_LLM/                       # Project root
 ├── arxiv_client.py                 # Core logic: API calls, HTML parsing, metadata, ChromaDB
-├── mcp_server.py                   # FastMCP server — exposes 9 tools to the LLM
+├── mcp_server.py                   # FastMCP server — exposes 11 tools to the LLM
 ├── tests/
-│   └── test_local_paper_tools.py   # 31 unit tests (all features covered, no network calls)
+│   └── test_local_paper_tools.py   # Unit tests (all features covered, no network calls)
 ├── requirements.txt                # Python dependencies
 └── README.md                       # This file
 
@@ -82,7 +104,9 @@ papers/
     ├── cs.AI/
     ├── ...
     ├── metadata.json               # Auto-saved paper metadata (title, abstract, authors, date)
-    └── .chroma/                    # ChromaDB index (created by build_search_index)
+    └── .chroma/                    # ChromaDB index directory
+        ├── arxiv_papers/           # Abstract-level index (build_search_index)
+        └── paper_sections/         # Section-level index (build_section_index)
 ```
 
 ---
@@ -120,7 +144,7 @@ Add the following to `~/Library/Application Support/Claude/claude_desktop_config
 }
 ```
 
-Restart Claude Desktop. A hammer icon (🔨) will appear — click it to verify all 9 tools are loaded.
+Restart Claude Desktop. A hammer icon (🔨) will appear — click it to verify all 11 tools are loaded.
 
 ### 4. Connect to VS Code Cline
 
@@ -134,12 +158,114 @@ If you already have papers downloaded before Phase 4 was added, run these once:
 
 ```
 # In Claude Desktop:
-1. backfill_metadata()        — fetch metadata for all existing papers from arXiv API
-2. build_search_index()       — embed abstracts (downloads ~80MB model on first run)
-3. search_local_papers_by_topic("your topic")  — ready to use
+1. backfill_metadata()             — fetch metadata for all existing papers from arXiv API
+2. build_search_index()            — embed abstracts (~80MB model downloaded on first run)
+3. build_section_index()           — embed all paper sections (takes longer for large libraries)
+4. search_local_papers_by_topic("your topic")   — abstract-level discovery
+5. search_sections_by_topic("your topic")       — section-level precision retrieval
 ```
 
-New papers downloaded via `download_arxiv_paper` or `bulk_download_papers` are automatically added to `metadata.json`. Re-run `build_search_index` periodically to keep the index fresh.
+New papers downloaded via `download_arxiv_paper` or `bulk_download_papers` are automatically added to `metadata.json`. Re-run `build_search_index` and `build_section_index` periodically to keep both indexes fresh.
+
+---
+
+## Scaling Strategy by Library Size
+
+As the local paper library grows, the recommended workflow evolves. The tools remain unchanged — only how they are combined changes.
+
+### < 100 papers
+
+**Workflow:** Full-text reading for every query.
+
+```
+search_local_papers_by_topic → analyze_local_paper (full text) → LLM answer
+```
+
+- Abstract index optional but recommended
+- Section index not yet necessary
+- Token cost per query: 50k–200k (full papers in context)
+
+---
+
+### 100 – 1,000 papers
+
+**Workflow:** Two-tier retrieval (abstract → section → targeted read).
+
+```
+search_local_papers_by_topic   → Top 10–20 papers
+search_sections_by_topic       → Top 3–5 relevant sections
+read_local_paper(offset=...)   → Read only those sections
+LLM answer
+```
+
+**Action items:**
+- Run `build_search_index` — abstract-level ChromaDB collection
+- Run `build_section_index` — section-level ChromaDB collection
+- Use `search_sections_by_topic(section_filter="method")` for methodology-specific queries
+- Token cost per query: ~5k–20k (sections only)
+
+---
+
+### 1,000 – 5,000 papers
+
+**Workflow:** Add hybrid retrieval (vector + keyword) and a reranker.
+
+```
+Hybrid retrieval:
+  BM25 keyword search (e.g. "Fama-French", "BAB") +
+  ChromaDB vector search
+  → merge results (EnsembleRetriever)
+
+Section-level reranker:
+  CrossEncoder (local model, ~100MB) reranks Top 20 → Top 5
+
+read_local_paper → LLM answer
+```
+
+**Action items:**
+- Add `rank_bm25` package for keyword search alongside ChromaDB
+- Add `cross-encoder/ms-marco-MiniLM-L-6-v2` reranker model
+- Implement `LangChain EnsembleRetriever` in `arxiv_bridge.py` (dashboard module)
+- Consider increasing HNSW index `ef` parameter for better recall at scale
+
+---
+
+### 5,000+ papers
+
+**Workflow:** Full multi-stage pipeline with query expansion.
+
+```
+Query expansion (LLM):
+  "BAB factor" → ["low beta portfolio", "betting against beta", "volatility anomaly"]
+
+For each expanded query:
+  Hybrid search (BM25 + ChromaDB) → Top 20
+
+Merge + deduplicate → Top 30 candidates
+
+CrossEncoder rerank → Top 5 sections
+
+LLM reads Top 5 sections → answer
+```
+
+**Action items:**
+- Migrate ChromaDB to a dedicated vector database: **Qdrant** (local Docker) or **Weaviate**
+- Enable HNSW index tuning (`m`, `ef_construction`) for better ANN recall
+- Add `MultiQueryRetriever` via LangChain for automatic query expansion
+- Add incremental indexing: new downloads trigger automatic index upsert without full rebuild
+- Consider abstractive summarisation per paper (store summary in metadata, embed summary instead of raw abstract)
+
+---
+
+### Index maintenance schedule
+
+| Trigger | Action |
+|---|---|
+| New papers downloaded | `backfill_metadata` → `build_search_index` → `build_section_index` |
+| Weekly (batch downloads) | Re-run both index builds (upsert-only, fast for existing papers) |
+| Schema change to metadata | `backfill_metadata` → rebuild both indexes |
+| 1,000+ paper milestone | Add BM25 + reranker layer |
+| 5,000+ paper milestone | Migrate to Qdrant/Weaviate |
 
 ---
 
@@ -169,9 +295,14 @@ New papers downloaded via `download_arxiv_paper` or `bulk_download_papers` are a
 - [x] Auto-save metadata on every download
 - [x] `backfill_metadata` — batch API backfill for pre-existing papers
 - [x] `build_search_index` — abstract embedding via sentence-transformers + ChromaDB
-- [x] `search_local_papers_by_topic` — semantic search over local library
+- [x] `search_local_papers_by_topic` — abstract-level semantic search
+- [x] `build_section_index` — section-level embedding (each section as separate document)
+- [x] `search_sections_by_topic` — targeted section retrieval with category/arxiv_id/name filters
 - [x] Claude Desktop MCP connection
 
 ### Later
 - [ ] PDF text extraction for `read_local_paper` (for papers without HTML)
-- [ ] Prompt cookbook (common research prompt examples)
+- [ ] BM25 hybrid search layer (for 1,000+ paper libraries)
+- [ ] CrossEncoder reranker integration
+- [ ] Incremental index updates on download (auto-trigger section index upsert)
+- [ ] LangChain multi-query retriever for query expansion

@@ -152,7 +152,7 @@ def backfill_metadata() -> str:
 
 
 # ==================================================================
-# Phase 4 — Semantic search
+# Phase 4 — Semantic search (abstract-level + section-level)
 # ==================================================================
 
 @mcp.tool()
@@ -173,6 +173,61 @@ def build_search_index() -> str:
 
 
 @mcp.tool()
+def build_section_index() -> str:
+    """
+    Build (or refresh) the section-level semantic search index.
+
+    Indexes each section (Abstract, Methodology, Results, etc.) of every local
+    .md paper as a separate document in ChromaDB collection "paper_sections".
+
+    Use after build_search_index for finer-grained retrieval.
+    Run again after downloading new papers to keep the index current.
+
+    Prerequisites:
+      - pip install chromadb sentence-transformers
+      - Papers must be downloaded as .md files (not PDF-only)
+    """
+    result = arxiv_client.build_section_index()
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+def search_sections_by_topic(
+    query: str,
+    n_results: int = 10,
+    category: str = "",
+    arxiv_id: str = "",
+    section_filter: str = "",
+) -> str:
+    """
+    Semantic search over indexed paper sections for targeted content retrieval.
+
+    More precise than search_local_papers_by_topic — finds the specific section
+    (Methodology, Results, etc.) most relevant to the query across all papers.
+
+    Token-efficient deep research workflow:
+      1. search_local_papers_by_topic → find relevant papers (abstract-level)
+      2. search_sections_by_topic     → pinpoint the relevant section
+      3. read_local_paper(offset=...)  → read only that section
+
+    Args:
+        query: Natural language query (e.g. "portfolio construction low volatility")
+        n_results: Number of sections to return (default 10)
+        category: Filter by arXiv category (e.g. "q-fin.PM"). Leave empty to search all.
+        arxiv_id: Limit search to sections of one specific paper (e.g. "2401.12345")
+        section_filter: Substring filter on section name (e.g. "method", "result", "abstract")
+    """
+    result = arxiv_client.search_sections_by_topic(
+        query=query,
+        n_results=n_results,
+        category=category.strip(),
+        arxiv_id=arxiv_id.strip(),
+        section_filter=section_filter.strip(),
+    )
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
 def search_local_papers_by_topic(
     query: str,
     n_results: int = 5,
@@ -183,6 +238,7 @@ def search_local_papers_by_topic(
 
     Returns papers ranked by similarity to the query (similarity_score 0–1).
     Use this to discover relevant papers from your local library before reading them.
+    For section-level precision, follow up with search_sections_by_topic.
 
     Args:
         query: Natural language topic (e.g. "cross-sectional momentum factor decay")

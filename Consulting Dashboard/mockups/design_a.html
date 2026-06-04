@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design A — Terminal Dark</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #000000;
+    --bg2: #0a0a0a;
+    --bg3: #111111;
+    --border: #1f1f1f;
+    --text: #e8e8e8;
+    --text-dim: #555;
+    --accent: #00ff88;
+    --accent2: #00cfff;
+    --accent3: #ff4fa3;
+    --accent4: #ffd700;
+    --neg: #ff3b3b;
+    --pos: #00ff88;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Top Bar ── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; height: 52px; border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .logo { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 2px; }
+  .logo span { color: var(--text-dim); }
+
+  /* ── Category Nav ── */
+  .catnav {
+    display: flex; align-items: center; gap: 2px;
+    padding: 0 24px; height: 44px; border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  .cat-btn {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 18px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.5px;
+    color: var(--text-dim); border: 1px solid transparent;
+    transition: all 0.15s; text-transform: uppercase;
+  }
+  .cat-btn:hover { color: var(--text); border-color: var(--border); }
+  .cat-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(0,255,136,0.05); }
+  .cat-btn .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .cat-divider { width: 1px; height: 20px; background: var(--border); margin: 0 8px; }
+
+  /* ── Main Layout ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Left Panel ── */
+  .left { flex: 1; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase;
+  }
+  .panel-header .title { color: var(--text); font-weight: 500; }
+  .badge { padding: 2px 8px; border-radius: 2px; font-size: 10px; background: rgba(0,255,136,0.1); color: var(--accent); border: 1px solid rgba(0,255,136,0.3); }
+
+  /* Search bar */
+  .search-area { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+  .search-input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 14px; color: var(--text);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; outline: none;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-dim); }
+  .btn { padding: 8px 16px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer; border: 1px solid var(--accent); color: var(--accent); background: transparent; letter-spacing: 0.5px; text-transform: uppercase; }
+  .btn:hover { background: rgba(0,255,136,0.1); }
+  .btn-sm { padding: 4px 10px; font-size: 10px; }
+  .filter-row { display: flex; gap: 8px; align-items: center; }
+  .chip { padding: 4px 10px; border-radius: 2px; font-size: 10px; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; font-family: 'JetBrains Mono', monospace; }
+  .chip.active { border-color: var(--accent2); color: var(--accent2); background: rgba(0,207,255,0.05); }
+
+  /* Results table */
+  .table-wrap { flex: 1; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th { padding: 10px 20px; text-align: left; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg2); }
+  tbody tr { border-bottom: 1px solid #0d0d0d; transition: background 0.1s; cursor: pointer; }
+  tbody tr:hover { background: var(--bg3); }
+  td { padding: 11px 20px; vertical-align: middle; }
+  .arxiv-id { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--accent2); }
+  .paper-title { font-size: 12px; color: var(--text); font-weight: 400; line-height: 1.4; }
+  .paper-title em { font-style: normal; color: var(--accent); }
+  .cat-tag { display: inline-block; padding: 2px 6px; border-radius: 2px; font-size: 9px; font-family: 'JetBrains Mono', monospace; background: rgba(255,79,163,0.1); color: var(--accent3); border: 1px solid rgba(255,79,163,0.2); }
+  .score-bar { display: flex; align-items: center; gap: 8px; }
+  .score-val { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); min-width: 36px; }
+  .bar { height: 3px; background: var(--border); border-radius: 2px; flex: 1; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+  .date { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-dim); }
+
+  /* ── Right Panel ── */
+  .right { width: 380px; display: flex; flex-direction: column; background: var(--bg2); }
+  .chat-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .chat-tab { flex: 1; padding: 12px; text-align: center; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; cursor: pointer; color: var(--text-dim); border-bottom: 2px solid transparent; }
+  .chat-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .model-select { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .model-label { font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; letter-spacing: 0.5px; }
+  .model-pill { padding: 4px 10px; border-radius: 20px; font-size: 10px; background: rgba(0,255,136,0.1); color: var(--accent); border: 1px solid rgba(0,255,136,0.3); font-family: 'JetBrains Mono', monospace; cursor: pointer; }
+
+  .chat-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { display: flex; flex-direction: column; gap: 4px; }
+  .msg-role { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+  .msg-role.user { color: var(--accent2); }
+  .msg-role.ai { color: var(--accent); }
+  .msg-bubble { padding: 10px 14px; border-radius: 4px; font-size: 12px; line-height: 1.6; }
+  .msg-bubble.user { background: rgba(0,207,255,0.07); border: 1px solid rgba(0,207,255,0.15); color: var(--text); }
+  .msg-bubble.ai { background: var(--bg3); border: 1px solid var(--border); color: var(--text); }
+  .msg-bubble code { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); }
+
+  .chat-input-area { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .chat-input { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; color: var(--text); font-size: 12px; resize: none; outline: none; font-family: 'Inter', sans-serif; }
+  .chat-input:focus { border-color: var(--accent); }
+  .send-btn { width: 36px; height: 36px; border-radius: 4px; background: var(--accent); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .send-btn svg { fill: black; }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div class="logo">QUANT<span>/</span>RESEARCH</div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <span style="font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">LLM: claude-opus-4-5</span>
+    <div style="width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent)"></div>
+  </div>
+</div>
+
+<!-- Category Nav -->
+<div class="catnav">
+  <div class="cat-btn active"><div class="dot"></div>Research LLM</div>
+  <div class="cat-divider"></div>
+  <div class="cat-btn"><div class="dot"></div>Market Regime</div>
+  <div class="cat-divider"></div>
+  <div class="cat-btn"><div class="dot"></div>Portfolio</div>
+  <div class="cat-divider"></div>
+  <div class="cat-btn"><div class="dot"></div>Factor Research</div>
+  <div class="cat-divider"></div>
+  <div class="cat-btn" style="color:var(--text-dim);margin-left:auto">⚙ Settings</div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <!-- Left: Paper Library -->
+  <div class="left">
+    <div class="panel-header">
+      <span class="title">Paper Library</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="badge">554 papers</span>
+        <span class="badge" style="background:rgba(0,207,255,0.1);color:var(--accent2);border-color:rgba(0,207,255,0.3)">10,086 sections indexed</span>
+      </div>
+    </div>
+
+    <div class="search-area" style="flex-direction:column;gap:10px">
+      <div style="display:flex;gap:10px">
+        <input class="search-input" type="text" placeholder="Search papers by topic... (e.g. 'BAB factor portfolio construction')">
+        <button class="btn">Search</button>
+      </div>
+      <div class="filter-row">
+        <span style="font-size:10px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">FILTER:</span>
+        <div class="chip active">All</div>
+        <div class="chip">q-fin.PM</div>
+        <div class="chip">q-fin.TR</div>
+        <div class="chip">q-fin.ST</div>
+        <div class="chip">q-fin.CP</div>
+        <div class="chip">cs.AI</div>
+        <div style="margin-left:auto;display:flex;gap:6px">
+          <div class="chip active" style="border-color:var(--accent2);color:var(--accent2)">Abstract</div>
+          <div class="chip">Section</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Category</th>
+            <th>Score</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="arxiv-id">2603.01820</div></td>
+            <td><div class="paper-title">Deep Learning for <em>Financial Time Series</em>: A Large-Scale Benchmark of Risk-Adjusted Performance</div></td>
+            <td><span class="cat-tag">q-fin.TR</span></td>
+            <td><div class="score-bar"><span class="score-val">0.591</span><div class="bar"><div class="bar-fill" style="width:59%"></div></div></div></td>
+            <td><span class="date">2026-03</span></td>
+          </tr>
+          <tr style="background:rgba(0,255,136,0.03)">
+            <td><div class="arxiv-id">2603.18107</div></td>
+            <td><div class="paper-title">ARTEMIS: A Neuro Symbolic Framework for Economically Constrained <em>Market Dynamics</em></div></td>
+            <td><span class="cat-tag">q-fin.ST</span></td>
+            <td><div class="score-bar"><span class="score-val">0.590</span><div class="bar"><div class="bar-fill" style="width:59%"></div></div></div></td>
+            <td><span class="date">2026-03</span></td>
+          </tr>
+          <tr>
+            <td><div class="arxiv-id">2603.19288</div></td>
+            <td><div class="paper-title">Joint Return and Risk Modeling with <em>Deep Neural Networks</em> for Portfolio Construction</div></td>
+            <td><span class="cat-tag" style="background:rgba(0,207,255,0.1);color:var(--accent2);border-color:rgba(0,207,255,0.2)">q-fin.PM</span></td>
+            <td><div class="score-bar"><span class="score-val">0.558</span><div class="bar"><div class="bar-fill" style="width:55%"></div></div></div></td>
+            <td><span class="date">2026-03</span></td>
+          </tr>
+          <tr>
+            <td><div class="arxiv-id">2602.17098</div></td>
+            <td><div class="paper-title">Deep Reinforcement Learning for Optimal <em>Portfolio Allocation</em>: A Comparative Study</div></td>
+            <td><span class="cat-tag" style="background:rgba(0,207,255,0.1);color:var(--accent2);border-color:rgba(0,207,255,0.2)">q-fin.PM</span></td>
+            <td><div class="score-bar"><span class="score-val">0.557</span><div class="bar"><div class="bar-fill" style="width:55%"></div></div></div></td>
+            <td><span class="date">2026-02</span></td>
+          </tr>
+          <tr>
+            <td><div class="arxiv-id">2601.19504</div></td>
+            <td><div class="paper-title">Generating Alpha: A Hybrid AI-Driven Trading System with <em>Regime-Adaptive</em> Equity Strategies</div></td>
+            <td><span class="cat-tag" style="background:rgba(255,215,0,0.08);color:var(--accent4);border-color:rgba(255,215,0,0.2)">q-fin.CP</span></td>
+            <td><div class="score-bar"><span class="score-val">0.528</span><div class="bar"><div class="bar-fill" style="width:52%"></div></div></div></td>
+            <td><span class="date">2026-01</span></td>
+          </tr>
+          <tr>
+            <td><div class="arxiv-id">2603.16886</div></td>
+            <td><div class="paper-title">A Controlled Comparison of Deep Learning Architectures for Multi-Horizon <em>Financial Forecasting</em></div></td>
+            <td><span class="cat-tag">q-fin.ST</span></td>
+            <td><div class="score-bar"><span class="score-val">0.560</span><div class="bar"><div class="bar-fill" style="width:56%"></div></div></div></td>
+            <td><span class="date">2026-02</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Right: LLM Chat -->
+  <div class="right">
+    <div class="chat-tabs">
+      <div class="chat-tab active">LLM Chat</div>
+      <div class="chat-tab">Paper Viewer</div>
+      <div class="chat-tab">Strategy</div>
+    </div>
+
+    <div class="model-select">
+      <span class="model-label">MODEL</span>
+      <div class="model-pill">claude-opus-4-5 ▾</div>
+      <div class="model-pill" style="background:rgba(0,207,255,0.08);color:var(--accent2);border-color:rgba(0,207,255,0.3)">Ollama ▾</div>
+    </div>
+
+    <div class="chat-msgs">
+      <div class="msg">
+        <div class="msg-role user">You</div>
+        <div class="msg-bubble user">BAB 팩터 포트폴리오 구성 방법 알려줘</div>
+      </div>
+      <div class="msg">
+        <div class="msg-role ai">Research LLM</div>
+        <div class="msg-bubble ai">로컬 라이브러리에서 <code>2603.19288</code> 등 관련 논문 3편을 찾았습니다.<br><br>
+        BAB (Betting Against Beta) 팩터는 낮은 베타 자산을 매수하고 높은 베타 자산을 공매도하는 전략입니다.<br><br>
+        <strong>포트폴리오 구성:</strong><br>
+        1. 각 자산의 beta 계산 (rolling 1Y)<br>
+        2. beta 기준 상/하위 20% 분류<br>
+        3. 저베타 매수 / 고베타 공매도<br>
+        4. Dollar-neutral 유지
+        </div>
+      </div>
+      <div class="msg">
+        <div class="msg-role user">You</div>
+        <div class="msg-bubble user">Python 코드로 구현해줘</div>
+      </div>
+      <div class="msg">
+        <div class="msg-role ai">Research LLM</div>
+        <div class="msg-bubble ai">논문 <code>2603.19288</code> Methodology 섹션을 기반으로 코드를 생성합니다...</div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <textarea class="chat-input" rows="2" placeholder="Ask about papers, request strategy code..."></textarea>
+      <button class="send-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

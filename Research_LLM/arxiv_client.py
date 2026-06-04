@@ -146,6 +146,29 @@ class ArxivToolClient:
             metadata={"hnsw:space": "cosine"},
         )
 
+    def _get_section_collection(self):
+        """Return (or create) the persistent ChromaDB collection for section-level search."""
+        try:
+            import chromadb
+            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        except ImportError:
+            raise ImportError(
+                "Phase 4 requires additional packages. "
+                "Run: pip install chromadb sentence-transformers"
+            )
+
+        chroma_dir = self._chroma_dir()
+        chroma_dir.mkdir(parents=True, exist_ok=True)
+
+        client = chromadb.PersistentClient(path=str(chroma_dir))
+        ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+
+        return client.get_or_create_collection(
+            name="paper_sections",
+            embedding_function=ef,
+            metadata={"hnsw:space": "cosine"},
+        )
+
     # ==================================================================
     # Local paper tools
     # ==================================================================
@@ -646,6 +669,194 @@ class ArxivToolClient:
             "status": "success",
             "indexed": len(ids),
             "total_in_collection": collection.count(),
+        }
+
+    def build_section_index(self) -> dict:
+        """
+        Build (or refresh) a section-level semantic search index.
+
+        Each logical section of every local .md paper (Abstract, Methodology,
+        Results, etc.) is embedded and stored as a separate document in ChromaDB.
+
+        This enables targeted retrieval of specific sections across thousands of
+        papers — far more precise than abstract-level search alone.
+
+        Document ID format: "{arxiv_id}::{section_index}" (unique per section).
+        Embedding text: section title + first 1000 chars of section content.
+
+        Prerequisites:
+          - pip install chromadb sentence-transformers
+          - Papers must be downloaded as .md files (not PDF-only).
+        """
+        base = Path(self.download_dir)
+        if not base.exists():
+            return {"status": "error", "message": "Download directory does not exist."}
+
+        try:
+            collection = self._get_section_collection()
+        except ImportError as e:
+            return {"status": "error", "message": str(e)}
+
+        metadata = self._load_metadata()
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas_list: list[dict] = []
+        papers_processed = 0
+        papers_skipped = 0
+
+        for file_path in sorted(base.rglob("*.md")):
+            arxiv_id = file_path.stem
+            rel_path = file_path.relative_to(base)
+            category = rel_path.parts[0] if len(rel_path.parts) > 1 else "Unknown"
+            paper_title = metadata.get(arxiv_id, {}).get("title", "")
+
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception:
+                papers_skipped += 1
+                continue
+
+            sections = self._extract_sections(content)
+            if not sections:
+                papers_skipped += 1
+                continue
+
+            for idx, section in enumerate(sections):
+                section_id = f"{arxiv_id}::{idx}"
+                # Embed: section title + first 1000 chars (fits within model token limit)
+                embed_text = f"{section['title']}: {section['content'][:1000]}"
+
+                ids.append(section_id)
+                documents.append(embed_text)
+                metadatas_list.append(
+                    {
+                        "arxiv_id": arxiv_id,
+                        "category": category,
+                        "section_name": section["title"],
+                        "section_index": idx,
+                        "char_count": section["char_count"],
+                        "paper_title": paper_title,
+                        "relative_path": str(rel_path),
+                    }
+                )
+
+            papers_processed += 1
+
+        if not ids:
+            return {
+                "status": "error",
+                "message": "No sections found. Ensure papers are downloaded as .md files.",
+            }
+
+        # Upsert in batches of 500 to handle large libraries safely
+        BATCH_SIZE = 500
+        for i in range(0, len(ids), BATCH_SIZE):
+            collection.upsert(
+                ids=ids[i : i + BATCH_SIZE],
+                documents=documents[i : i + BATCH_SIZE],
+                metadatas=metadatas_list[i : i + BATCH_SIZE],
+            )
+
+        return {
+            "status": "success",
+            "papers_processed": papers_processed,
+            "papers_skipped": papers_skipped,
+            "sections_indexed": len(ids),
+            "total_in_collection": collection.count(),
+        }
+
+    def search_sections_by_topic(
+        self,
+        query: str,
+        n_results: int = 10,
+        category: str = "",
+        arxiv_id: str = "",
+        section_filter: str = "",
+    ) -> dict:
+        """
+        Semantic search over indexed paper sections.
+
+        More precise than abstract-level search — finds the specific section
+        (Methodology, Results, etc.) most relevant to the query, across all papers.
+
+        Args:
+            query: Natural language query (e.g. "BAB factor portfolio construction")
+            n_results: Number of sections to return (default 10)
+            category: Filter by arXiv category (e.g. "q-fin.PM")
+            arxiv_id: Limit search to sections of one specific paper
+            section_filter: Substring filter on section name (e.g. "method", "result")
+        """
+        if not query:
+            return {"status": "error", "message": "query is required."}
+
+        try:
+            collection = self._get_section_collection()
+        except ImportError as e:
+            return {"status": "error", "message": str(e)}
+
+        if collection.count() == 0:
+            return {
+                "status": "error",
+                "message": "Section index is empty. Run build_section_index first.",
+            }
+
+        n_results = max(1, min(n_results, collection.count()))
+
+        # Build ChromaDB where filter
+        where = None
+        where_conditions = []
+        if category.strip():
+            where_conditions.append({"category": category.strip()})
+        if arxiv_id.strip():
+            where_conditions.append({"arxiv_id": arxiv_id.strip()})
+
+        if len(where_conditions) == 1:
+            where = where_conditions[0]
+        elif len(where_conditions) > 1:
+            where = {"$and": where_conditions}
+
+        try:
+            results = collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                where=where,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as e:
+            return {"status": "error", "message": f"Search failed: {str(e)}"}
+
+        sections = []
+        for i in range(len(results["ids"][0])):
+            meta = results["metadatas"][0][i]
+            section_name = meta.get("section_name", "")
+
+            # Post-filter by section name substring (ChromaDB has no substring where)
+            if section_filter.strip() and section_filter.lower() not in section_name.lower():
+                continue
+
+            doc = results["documents"][0][i]
+            preview = doc[:500] + "..." if len(doc) > 500 else doc
+
+            sections.append(
+                {
+                    "arxiv_id": meta.get("arxiv_id", ""),
+                    "paper_title": meta.get("paper_title", ""),
+                    "category": meta.get("category", ""),
+                    "section_name": section_name,
+                    "section_index": meta.get("section_index", 0),
+                    "char_count": meta.get("char_count", 0),
+                    "relative_path": meta.get("relative_path", ""),
+                    "preview": preview,
+                    "similarity_score": round(1 - results["distances"][0][i], 4),
+                }
+            )
+
+        return {
+            "status": "success",
+            "query": query,
+            "results": sections,
+            "count": len(sections),
         }
 
     def search_local_papers_by_topic(

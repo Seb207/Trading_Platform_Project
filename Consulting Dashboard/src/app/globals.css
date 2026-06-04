@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/* ── Design A — Terminal Dark: Color Tokens ── */
+@theme inline {
+  /* Background layers */
+  --color-bg:      #000000;
+  --color-bg2:     #0a0a0a;
+  --color-bg3:     #111111;
+  --color-bg4:     #181818;
+
+  /* Borders */
+  --color-border:  #1f1f1f;
+  --color-border2: #2a2a2a;
+
+  /* Text */
+  --color-text:     #e8e8e8;
+  --color-text-dim: #555555;
+  --color-text-mid: #888888;
+
+  /* Accent colors */
+  --color-accent:  #00ff88;   /* neon green — active states, positive */
+  --color-accent2: #00cfff;   /* cyan — arXiv IDs, secondary */
+  --color-accent3: #ff4fa3;   /* pink — category tags */
+  --color-accent4: #ffd700;   /* gold — category tags */
+  --color-neg:     #ff3b3b;   /* red — negative values */
+
+  /* Fonts */
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  --font-sans: var(--font-inter), "Inter", sans-serif;
+}
+
+/* ── Base Styles ── */
+:root {
+  color-scheme: dark;
+}
+
+html, body {
+  height: 100%;
+  background-color: #000000;
+  color: #e8e8e8;
+  font-family: var(--font-sans), "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f1f1f;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+}
+
+/* ── Selection ── */
+::selection {
+  background: rgba(0, 255, 136, 0.2);
+  color: #e8e8e8;
+}
+
+/* ── Focus ring ── */
+*:focus-visible {
+  outline: 1px solid #00ff88;
+  outline-offset: 2px;
+}
