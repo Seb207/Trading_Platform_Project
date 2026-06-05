@@ -25,11 +25,28 @@ class OllamaProvider(LLMProvider):
             all_messages.append({"role": "system", "content": system})
         all_messages.extend(messages)
 
-        async with httpx.AsyncClient(timeout=120) as client:
+        # Size the context window to the input. Ollama defaults num_ctx to 4096,
+        # which silently truncates a full-paper prompt (~10k+ tokens) — dropping
+        # the question and producing degenerate output. Estimate tokens (~3 chars/
+        # token for dense academic text), add output headroom, clamp to a range
+        # these local models support.
+        total_chars = sum(len(m.get("content", "")) for m in all_messages)
+        est_tokens  = total_chars // 3
+        num_ctx     = est_tokens + 2048                    # headroom for the answer
+        num_ctx     = max(4096, min(num_ctx, 32768))
+        num_ctx     = ((num_ctx + 2047) // 2048) * 2048    # round up to a clean multiple
+
+        # Large local-model contexts are slow to prefill — give them time.
+        async with httpx.AsyncClient(timeout=600) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/api/chat",
-                json={"model": self.model, "messages": all_messages, "stream": True},
+                json={
+                    "model":    self.model,
+                    "messages": all_messages,
+                    "stream":   True,
+                    "options":  {"num_ctx": num_ctx},
+                },
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():

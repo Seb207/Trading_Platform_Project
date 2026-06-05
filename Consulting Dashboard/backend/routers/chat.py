@@ -57,12 +57,23 @@ def _build_system(req: ChatRequest) -> str:
     if ctx.content_level == "full":
         result = arxiv_client.analyze_local_paper(relative_path=ctx.relative_path)
         if result.get("status") == "success":
+            # Cap paper text by provider context budget:
+            #   Claude  → 200k-token window, cap ~120k chars (~90k tokens)
+            #   Ollama  → small local model: cap ~32k chars (~10k tokens) so the
+            #             paper + question + answer fit one context and prompt eval
+            #             stays fast. Larger inputs get silently truncated by Ollama,
+            #             dropping the question and producing degenerate output.
+            char_cap = 32_000 if req.provider == "ollama" else 120_000
+            full = result["full_content"]
+            body = full[:char_cap]
+            truncated = len(full) > char_cap
             paper_block = (
                 f"\n\n--- SELECTED PAPER ---\n"
                 f"arXiv ID : {result['arxiv_id']}\n"
                 f"Category : {result['category']}\n"
-                f"Sections : {result['section_count']}\n\n"
-                f"{result['full_content'][:120_000]}"   # cap at ~90k tokens
+                f"Sections : {result['section_count']}\n"
+                + ("(Note: paper truncated to fit the local model's context.)\n" if truncated and req.provider == "ollama" else "")
+                + f"\n{body}"
             )
             return base + paper_block
 

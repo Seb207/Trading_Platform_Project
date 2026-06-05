@@ -236,6 +236,19 @@ LLMProvider (base.py — abstract)
 
 When Ollama is selected, `ModelSelector` fetches `GET {ollamaUrl}/api/tags` and shows only locally installed models. If Ollama is not running, an error state with instructions is displayed.
 
+**Context window (`num_ctx`) — full-paper grounding.** Ollama defaults `num_ctx`
+to **4096 tokens**, which silently truncates a full-paper prompt (~30k–40k tokens),
+dropping the user's question and producing a degenerate one-token reply (e.g. `"The"`).
+The provider fixes this:
+
+| Layer | Behaviour |
+|---|---|
+| `OllamaProvider` | Sizes `num_ctx` to the input (`≈chars/3 + 2048` headroom, clamped **4096–32768**) and passes it in `options`. Timeout raised to **600 s** (local prefill of large contexts is slow). |
+| `chat.py` (`_build_system`) | Provider-aware paper cap — **Claude ≤120k chars** (~90k tok), **Ollama ≤32k chars** (~10k tok) so the paper + question + answer fit one context and prefill stays ~1 min. Truncation is noted inline. |
+
+> Local small models can't hold a 40k-token paper comfortably. For whole-paper
+> depth use Claude; for quick local questions use the **Abstract** toggle.
+
 ### Adding a new provider
 
 1. Create `backend/modules/llm/myprovider.py` implementing `LLMProvider.stream()`
@@ -434,6 +447,7 @@ Math: KaTeX with dark-theme overrides (display math gets a left accent rail).
 - [x] Full-text chat grounding — `.md` **and PDF** body injected (Abstract/Full toggle)
 - [x] PDF text extraction (pypdf) — PDF papers readable in chat + viewer
 - [x] All 919 papers carry metadata (API canonical; local extraction stopgap + refresh script)
+- [x] Ollama `num_ctx` auto-sizing + provider-aware paper cap (fixes full-paper truncation on local models)
 
 ### Planned
 
