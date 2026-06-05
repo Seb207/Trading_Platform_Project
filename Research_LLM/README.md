@@ -111,6 +111,37 @@ papers/
 
 ---
 
+## Embedding Model
+
+Semantic search uses **`BAAI/bge-base-en-v1.5`** (768-dim, ~430 MB).  
+Downloaded automatically on first use via `sentence-transformers`.
+
+> Previously used `all-MiniLM-L6-v2` (384-dim). Upgraded to `bge-base-en-v1.5` for significantly better retrieval quality on academic and financial text.
+
+To rebuild the ChromaDB index after a model change:
+
+```bash
+rm -rf papers/arXiv/.chroma
+# then re-run build_search_index + build_section_index
+```
+
+---
+
+## Dashboard Integration
+
+This project is used as a library by **Consulting Dashboard** (`../Consulting Dashboard/`):
+
+```
+Consulting Dashboard/backend/modules/research/arxiv_bridge.py
+  → adds Research_LLM/ to sys.path
+  → imports ArxivToolClient (singleton, lru_cache)
+  → exposes all tools as FastAPI endpoints
+```
+
+`arxiv_client.py` is shared between the MCP server and the dashboard with **no code duplication and no modification**.
+
+---
+
 ## Setup & Installation
 
 ### 1. Install dependencies
@@ -299,6 +330,10 @@ LLM reads Top 5 sections → answer
 - [x] `build_section_index` — section-level embedding (each section as separate document)
 - [x] `search_sections_by_topic` — targeted section retrieval with category/arxiv_id/name filters
 - [x] Claude Desktop MCP connection
+- [x] Embedding model upgraded to `BAAI/bge-base-en-v1.5` (768-dim)
+- [x] arXiv API rate limiting — 3 s minimum interval between calls
+- [x] arXiv API retry — exponential backoff on 429/503/timeout (30 s → 60 s)
+- [x] Dashboard integration via `arxiv_bridge.py` (no code duplication)
 
 ### Later
 - [ ] PDF text extraction for `read_local_paper` (for papers without HTML)

@@ -229,8 +229,8 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
                 <span className="font-mono text-[10px] text-text-dim tracking-widest uppercase">Ready</span>
                 <p className="text-text-dim text-[11px] leading-relaxed max-w-[220px]">
                   {selectedPaper
-                    ? `논문 ${selectedPaper.arxiv_id} 선택됨.\n질문하거나 전략 코드를 요청하세요.`
-                    : "좌측에서 논문을 선택 후 질문하세요."}
+                    ? `Paper ${selectedPaper.arxiv_id} selected.\nAsk questions or request strategy code.`
+                    : "Select a paper from the list on the left to start."}
                 </p>
               </div>
             )}

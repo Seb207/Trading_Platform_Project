@@ -72,11 +72,11 @@ export default function PaperTable({
 
         {/* Body */}
         <tbody>
-          {papers.map((paper) => {
+          {papers.map((paper, idx) => {
             const isSelected = paper.arxiv_id === selectedId;
             return (
               <tr
-                key={paper.arxiv_id}
+                key={`${paper.arxiv_id}-${idx}`}
                 onClick={() => onSelect?.(paper)}
                 className={[
                   "border-b border-border/40 cursor-pointer transition-colors duration-75 group",

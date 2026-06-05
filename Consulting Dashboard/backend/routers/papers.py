@@ -47,7 +47,7 @@ import urllib.parse as _urlparse
 
 _ARXIV_API_URL    = "https://export.arxiv.org/api/query"  # HTTPS directly
 _ARXIV_MIN_INTERVAL: float = 3.0
-_ARXIV_TIMEOUT:    int = 60          # seconds per attempt
+_ARXIV_TIMEOUT:    int = 20          # seconds per attempt (reduced for faster UX)
 _last_arxiv_call:  float = 0.0
 
 
@@ -111,12 +111,23 @@ def _search_arxiv_with_retry(
         }
         try:
             resp = _requests.get(url, timeout=_ARXIV_TIMEOUT, headers=_headers)
-            if resp.status_code in (429, 503):
-                raise _requests.HTTPError(response=resp)
+
+            # arXiv returns HTTP 200 with plain-text "Rate exceeded." when rate limited.
+            # Also handle 429/503 HTTP codes.
+            # Rate-limiting is transient — fail immediately and let the user retry.
+            if resp.status_code == 429 or resp.text.strip() == "Rate exceeded.":
+                return [{"error": "HTTP 429: arXiv API rate limit exceeded — 잠시 후 다시 시도하세요."}]
+            if resp.status_code == 503:
+                return [{"error": "HTTP 503: arXiv API temporarily unavailable — 잠시 후 다시 시도하세요."}]
+
             resp.raise_for_status()
             return client._parse_entries(resp.text)
 
-        except (_requests.Timeout, _requests.ConnectionError, _requests.HTTPError) as exc:
+        except _requests.Timeout:
+            # Timeout — fail fast, let user retry manually
+            return [{"error": "HTTP 504: arXiv API timed out — 잠시 후 다시 시도하세요."}]
+
+        except (_requests.ConnectionError, _requests.HTTPError) as exc:
             code = getattr(getattr(exc, "response", None), "status_code", 0)
             is_last = attempt == max_retries - 1
             if is_last:
@@ -206,7 +217,19 @@ def list_papers(
         raise HTTPException(status_code=500, detail=result.get("message"))
 
     metadata = _load_metadata()
-    result["papers"] = _enrich_papers(result["papers"], metadata)
+    papers = _enrich_papers(result["papers"], metadata)
+
+    # Deduplicate by arxiv_id — keep first occurrence (preserves sort order)
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for p in papers:
+        aid = p.get("arxiv_id", "")
+        if aid not in seen:
+            seen.add(aid)
+            unique.append(p)
+
+    result["papers"] = unique
+    result["count"]  = len(unique)
     return result
 
 

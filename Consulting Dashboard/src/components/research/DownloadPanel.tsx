@@ -5,19 +5,19 @@ import { useState, useRef } from "react";
 const BASE_URL = "http://localhost:8000";
 
 // ── arXiv category list ─────────────────────────────────────────────────
-// ── 로컬 DB에 존재하는 카테고리 (편수 순) + arXiv 추가 검색용 ──────────
+// Local DB categories (sorted by paper count) + extra categories for arXiv search
 const ARXIV_CATEGORIES = [
   { value: "",           label: "All categories" },
-  // ── 로컬 DB 보유 ──────────────────────────────
-  { value: "q-fin.RM",  label: "q-fin.RM · Risk Management         (111편)" },
-  { value: "q-fin.MF",  label: "q-fin.MF · Mathematical Finance    (105편)" },
-  { value: "q-fin.CP",  label: "q-fin.CP · Computational Finance    (96편)" },
-  { value: "q-fin.ST",  label: "q-fin.ST · Statistical Finance      (90편)" },
-  { value: "q-fin.PM",  label: "q-fin.PM · Portfolio Management     (84편)" },
-  { value: "q-fin.TR",  label: "q-fin.TR · Trading & Microstructure (62편)" },
-  { value: "q-fin.GN",  label: "q-fin.GN · General Finance          (46편)" },
-  { value: "q-fin.PR",  label: "q-fin.PR · Pricing of Securities    (36편)" },
-  // ── arXiv 검색용 추가 카테고리 ───────────────
+  // Local DB
+  { value: "q-fin.RM",  label: "q-fin.RM · Risk Management         (111 papers)" },
+  { value: "q-fin.MF",  label: "q-fin.MF · Mathematical Finance    (105 papers)" },
+  { value: "q-fin.CP",  label: "q-fin.CP · Computational Finance    (96 papers)"  },
+  { value: "q-fin.ST",  label: "q-fin.ST · Statistical Finance      (90 papers)"  },
+  { value: "q-fin.PM",  label: "q-fin.PM · Portfolio Management     (84 papers)"  },
+  { value: "q-fin.TR",  label: "q-fin.TR · Trading & Microstructure (62 papers)"  },
+  { value: "q-fin.GN",  label: "q-fin.GN · General Finance          (46 papers)"  },
+  { value: "q-fin.PR",  label: "q-fin.PR · Pricing of Securities    (36 papers)"  },
+  // Additional arXiv categories
   { value: "q-fin.EC",  label: "q-fin.EC · Economics" },
   { value: "cs.AI",     label: "cs.AI   · Artificial Intelligence" },
   { value: "cs.LG",     label: "cs.LG   · Machine Learning" },
@@ -71,7 +71,7 @@ export default function DownloadPanel() {
   // ── Preview ────────────────────────────────────────────────────────
   const handlePreview = async () => {
     if (!query && !category) {
-      setPreviewError("쿼리 또는 카테고리를 입력하세요.");
+      setPreviewError("Enter a query or select a category.");
       return;
     }
     setPreviewing(true);
@@ -100,15 +100,15 @@ export default function DownloadPanel() {
       }
       const data = await res.json();
       setPreviewPapers(data.results ?? []);
-      if ((data.results ?? []).length === 0) setPreviewError("검색 결과가 없습니다.");
+      if ((data.results ?? []).length === 0) setPreviewError("No results found.");
       else {
         // Select all by default
         setSelected(new Set(data.results.map((p: PreviewPaper) => p.arxiv_id)));
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Preview failed";
-      if (msg.includes("429") || msg.includes("503") || msg.includes("502")) {
-        setPreviewError("arXiv API 일시 제한 — 잠시 후 다시 시도하세요. (보통 10~30초)");
+      if (msg.includes("429") || msg.includes("503") || msg.includes("502") || msg.includes("504")) {
+        setPreviewError("arXiv API rate limited / timed out — please try again shortly.");
       } else {
         setPreviewError(msg);
       }
@@ -140,7 +140,7 @@ export default function DownloadPanel() {
     if (ids.length === 0) return;
 
     setDownloading(true);
-    setLog([{ kind: "info", text: `${ids.length}개 논문 다운로드 시작…` }]);
+    setLog([{ kind: "info", text: `Starting download of ${ids.length} paper(s)…` }]);
 
     // Category for file organisation: use selected category or "Unknown"
     const folderCat = category || "Unknown";
@@ -153,7 +153,7 @@ export default function DownloadPanel() {
         body: JSON.stringify({ arxiv_ids: ids, category: folderCat, auto_index: autoIndex }),
       });
     } catch {
-      appendLog({ kind: "error", text: "백엔드에 연결할 수 없습니다." });
+      appendLog({ kind: "error", text: "Cannot reach backend — is FastAPI running on port 8000?" });
       setDownloading(false);
       return;
     }
@@ -182,7 +182,7 @@ export default function DownloadPanel() {
           const ev = JSON.parse(line.slice(6));
 
           if (ev.type === "paper_start") {
-            appendLog({ kind: "info", text: `[${ev.index}/${ev.total}] 다운로드 중: ${ev.arxiv_id}` });
+            appendLog({ kind: "info", text: `[${ev.index}/${ev.total}] Downloading: ${ev.arxiv_id}` });
           } else if (ev.type === "paper_done") {
             appendLog({ kind: "ok", text: `  ✓ ${ev.arxiv_id} (${ev.format})` });
           } else if (ev.type === "paper_error") {
@@ -191,15 +191,15 @@ export default function DownloadPanel() {
             appendLog({ kind: "step", text: `⟳ ${ev.message}` });
           } else if (ev.type === "step_done") {
             const n = ev.name;
-            if (n === "backfill")       appendLog({ kind: "ok", text: `  ✓ 메타데이터 업데이트 완료 (${ev.backfilled ?? 0}건)` });
-            if (n === "abstract_index") appendLog({ kind: "ok", text: `  ✓ 초록 인덱스 완료 (총 ${ev.total_in_collection ?? ev.indexed ?? 0}편)` });
-            if (n === "section_index")  appendLog({ kind: "ok", text: `  ✓ 섹션 인덱스 완료 (${ev.sections_indexed ?? 0} 섹션)` });
+            if (n === "backfill")       appendLog({ kind: "ok", text: `  ✓ Metadata updated (${ev.backfilled ?? 0} entries)` });
+            if (n === "abstract_index") appendLog({ kind: "ok", text: `  ✓ Abstract index built (${ev.total_in_collection ?? ev.indexed ?? 0} papers total)` });
+            if (n === "section_index")  appendLog({ kind: "ok", text: `  ✓ Section index built (${ev.sections_indexed ?? 0} sections)` });
           } else if (ev.type === "step_error") {
             appendLog({ kind: "error", text: `  ✗ ${ev.name}: ${ev.message}` });
           } else if (ev.type === "done") {
             appendLog({
               kind: "done",
-              text: `완료 — ${ev.downloaded}편 저장, ${ev.failed}편 실패`,
+              text: `Done — ${ev.downloaded} saved, ${ev.failed} failed`,
             });
           }
         } catch { /* ignore */ }
@@ -217,7 +217,7 @@ export default function DownloadPanel() {
           arXiv Download
         </span>
         <span className="font-mono text-[9px] text-text-dim">
-          arXiv API → 로컬 폴더 → ChromaDB
+          arXiv API → local folder → ChromaDB
         </span>
       </div>
 
@@ -229,7 +229,7 @@ export default function DownloadPanel() {
           {/* Query */}
           <div>
             <label className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-1 block">
-              검색 쿼리 (선택)
+              Search Query (optional)
             </label>
             <input
               type="text"
@@ -244,7 +244,7 @@ export default function DownloadPanel() {
           {/* Category */}
           <div>
             <label className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-1 block">
-              카테고리
+              Category
             </label>
             <select
               value={category}
@@ -261,7 +261,7 @@ export default function DownloadPanel() {
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-1 block">
-                시작일
+                Date From
               </label>
               <input
                 type="date"
@@ -272,7 +272,7 @@ export default function DownloadPanel() {
             </div>
             <div className="flex-1">
               <label className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-1 block">
-                종료일
+                Date To
               </label>
               <input
                 type="date"
@@ -287,7 +287,7 @@ export default function DownloadPanel() {
           <div className="flex items-end gap-4">
             <div>
               <label className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-1 block">
-                최대 결과 수
+                Max Results
               </label>
               <input
                 type="number"
@@ -305,7 +305,7 @@ export default function DownloadPanel() {
                 onChange={(e) => setAutoIndex(e.target.checked)}
                 className="accent-accent w-3.5 h-3.5"
               />
-              <span className="font-mono text-[10px] text-text-mid">자동 임베딩 (ChromaDB)</span>
+              <span className="font-mono text-[10px] text-text-mid">Auto-embed (ChromaDB)</span>
             </label>
           </div>
 
@@ -315,7 +315,7 @@ export default function DownloadPanel() {
             disabled={previewing}
             className="w-full py-2 border border-accent text-accent font-mono text-[11px] rounded-sm hover:bg-accent/10 transition-colors disabled:opacity-50"
           >
-            {previewing ? "검색 중…" : "arXiv 검색 미리보기"}
+            {previewing ? "Searching…" : "Preview arXiv Search"}
           </button>
 
           {previewError && (
@@ -332,10 +332,10 @@ export default function DownloadPanel() {
                 onClick={toggleAll}
                 className="font-mono text-[9px] text-text-dim hover:text-text transition-colors"
               >
-                {selected.size === previewPapers.length ? "전체 해제" : "전체 선택"}
+                {selected.size === previewPapers.length ? "Deselect All" : "Select All"}
               </button>
               <span className="font-mono text-[9px] text-text-dim">
-                {selected.size} / {previewPapers.length} 선택
+                {selected.size} / {previewPapers.length} selected
               </span>
               <button
                 onClick={handleDownload}
@@ -347,14 +347,14 @@ export default function DownloadPanel() {
                     : "border-border text-text-dim opacity-50 cursor-not-allowed",
                 ].join(" ")}
               >
-                {downloading ? "다운로드 중…" : `${selected.size}편 다운로드`}
+                {downloading ? "Downloading…" : `Download ${selected.size}`}
               </button>
             </div>
 
             {/* Paper list */}
-            {previewPapers.map((p) => (
+            {previewPapers.map((p, idx) => (
               <label
-                key={p.arxiv_id}
+                key={`${p.arxiv_id}-${idx}`}
                 className="flex items-start gap-3 px-5 py-3 border-b border-border/40 hover:bg-bg2 cursor-pointer"
               >
                 <input

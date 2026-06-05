@@ -40,10 +40,10 @@ function EmptyState({ reason }: { reason: EmptyReason }) {
         <>
           <span className="font-mono text-[10px] text-text-dim tracking-widest uppercase">Section Search</span>
           <p className="text-text-dim text-[12px] leading-relaxed max-w-[260px]">
-            섹션 검색은 쿼리가 필요합니다.<br />
-            검색창에 키워드를 입력하세요.<br />
+            Section search requires a query.<br />
+            Type a keyword in the search box.<br />
             <span className="text-text-mid text-[11px] mt-1 block font-mono">
-              예: &quot;BAB factor portfolio construction&quot;
+              e.g. &quot;BAB factor portfolio construction&quot;
             </span>
           </p>
         </>
@@ -51,7 +51,7 @@ function EmptyState({ reason }: { reason: EmptyReason }) {
       {reason === "no-results" && (
         <>
           <span className="font-mono text-[10px] text-text-dim tracking-widest uppercase">No Results</span>
-          <p className="text-text-dim text-[12px]">다른 쿼리나 필터를 시도해 보세요.</p>
+          <p className="text-text-dim text-[12px]">Try a different query or filter.</p>
         </>
       )}
     </div>
@@ -127,8 +127,8 @@ function PaperLibrary({
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Search failed";
         setError(
-          msg.includes("429") || msg.includes("503") || msg.includes("502")
-            ? "arXiv API 일시 제한 — 잠시 후 다시 시도하세요."
+          msg.includes("429") || msg.includes("503") || msg.includes("502") || msg.includes("504")
+            ? "arXiv API rate limited / timed out — please try again shortly."
             : msg,
         );
       } finally {
