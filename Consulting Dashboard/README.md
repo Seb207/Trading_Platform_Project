@@ -168,9 +168,10 @@ download. Right panel = LLM chat. All UI text is in English.
 | q-fin.PR · Pricing of Securities | 56 |
 | **Total** | **919** |
 
-> Metadata is populated for 677 papers; the remaining ~23 are PDF-only downloads
-> awaiting title/abstract (parsed from `.md` locally where possible — see
-> *arXiv API* below). All 919 are searchable via Section search regardless.
+> Metadata is now populated for **all 919 papers** (700 unique entries: 584 from the
+> arXiv API + 116 parsed locally from `.md`/PDF text as a stopgap). Local-extracted
+> entries (empty `published`) are upgraded to canonical API metadata by
+> `Research_LLM/scripts/refresh_api_metadata.py` once the API rate limit clears.
 
 #### Left panel — Download tab
 
@@ -185,9 +186,14 @@ download. Right panel = LLM chat. All UI text is in English.
 
 | Tab | Content |
 |---|---|
-| **LLM Chat** | Streaming chat with Claude or Ollama. Selected paper injected into system prompt. |
-| **Paper Viewer** | Collapsible **section accordion** — click any heading to expand its full content. LaTeX math (`$…$`, `$$…$$`) renders via KaTeX. Expand/collapse all. Memory-efficient: section bodies mount only when opened (`useMemo` parse + `Set<number>` open-state). |
+| **LLM Chat** | Streaming chat with Claude or Ollama. Selected paper injected into the system prompt. An **Abstract / Full** toggle (default **Full**) controls grounding depth — *Full* injects the entire paper body (`.md` **or** PDF text), *Abstract* injects only the abstract (cheaper). |
+| **Paper Viewer** | Collapsible **section accordion** — click any heading to expand its full content. LaTeX math (`$…$`, `$$…$$`) renders via KaTeX. Expand/collapse all. Memory-efficient: section bodies mount only when opened (`useMemo` parse + `Set<number>` open-state). Works for PDF papers too (full text shown as one block). |
 | **Strategy** | Automatically extracts all code blocks from LLM responses. Copy button per block. |
+
+**PDF papers are now first-class** in chat and the viewer: text is extracted on
+demand via pypdf (`analyze_local_paper`), so a PDF-only paper is read and answered
+just like a Markdown one. Previously the chat received only the abstract (and
+nothing at all for papers lacking metadata).
 
 **Model status dot** (ModelSelector + TopBar) reflects the *real* connection state:
 grey = no API key, green = Claude key set / Ollama connected, amber = Ollama connecting,
@@ -266,7 +272,7 @@ Range: 0 (unrelated) → 1 (identical). ChromaDB uses HNSW with cosine space.
 "{section_title}: {section_content[:1000]}"
 ```
 
-~19,500 sections indexed across 788 `.md` papers (abstract index: 666 papers).
+~19,500 sections indexed across 788 `.md` papers (abstract index: 687 papers, incl. PDF abstracts).
 
 ### Rebuilding the index
 
@@ -425,6 +431,9 @@ Math: KaTeX with dark-theme overrides (display math gets a left accent rail).
 - [x] Max Results input — free editing, clamp on blur
 - [x] Category rename: "Research LLM" → "Paper2Alpha"
 - [x] macOS `.app` launcher (green Q icon) — app lifecycle manages servers
+- [x] Full-text chat grounding — `.md` **and PDF** body injected (Abstract/Full toggle)
+- [x] PDF text extraction (pypdf) — PDF papers readable in chat + viewer
+- [x] All 919 papers carry metadata (API canonical; local extraction stopgap + refresh script)
 
 ### Planned
 

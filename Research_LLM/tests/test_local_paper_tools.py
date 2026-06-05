@@ -97,10 +97,17 @@ class TestLocalPaperTools(unittest.TestCase):
         sig = inspect.signature(self.client.read_local_paper)
         self.assertEqual(sig.parameters["max_chars"].default, 50000)
 
-    def test_read_local_paper_pdf_not_supported(self) -> None:
+    def test_read_local_paper_pdf_extraction_attempted(self) -> None:
+        # PDF is now supported via pypdf. The fixture is a stub (header only),
+        # so extraction fails gracefully — but it is no longer rejected outright.
         result = self.client.read_local_paper("q-fin.CP/1111.2222.pdf")
         self.assertEqual(result["status"], "error")
-        self.assertIn("PDF text extraction is not supported", result["message"])
+        self.assertNotIn("not supported", result["message"])
+        self.assertTrue(
+            "extraction failed" in result["message"]
+            or "no extractable text" in result["message"],
+            msg=result["message"],
+        )
 
     def test_read_local_paper_blocks_path_traversal(self) -> None:
         result = self.client.read_local_paper("../../etc/passwd")
@@ -145,10 +152,17 @@ class TestLocalPaperTools(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("not found", result["message"].lower())
 
-    def test_analyze_local_paper_pdf_not_supported(self) -> None:
+    def test_analyze_local_paper_pdf_extraction_attempted(self) -> None:
+        # PDF analysis is now supported (full text → single section). The stub
+        # fixture fails extraction gracefully rather than being rejected as ".md only".
         result = self.client.analyze_local_paper("q-fin.CP/1111.2222.pdf")
         self.assertEqual(result["status"], "error")
-        self.assertIn(".md", result["message"])
+        self.assertNotIn("Only .md", result["message"])
+        self.assertTrue(
+            "extraction failed" in result["message"]
+            or "no extractable text" in result["message"],
+            msg=result["message"],
+        )
 
     def test_analyze_local_paper_blocks_path_traversal(self) -> None:
         result = self.client.analyze_local_paper("../../etc/passwd")

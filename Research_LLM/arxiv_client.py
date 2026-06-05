@@ -119,6 +119,37 @@ class ArxivToolClient:
 
         return sections
 
+    @staticmethod
+    def _extract_pdf_text(pdf_path: Path, max_pages: int | None = None) -> str:
+        """
+        Extract plain text from a PDF using pypdf.
+
+        Returns the concatenated page text (pages separated by blank lines).
+        Raises ImportError if pypdf is unavailable, or RuntimeError on parse failure.
+        """
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise ImportError(
+                "PDF text extraction requires pypdf. Run: pip install pypdf"
+            ) from exc
+
+        try:
+            reader = PdfReader(str(pdf_path))
+        except Exception as exc:
+            raise RuntimeError(f"Could not open PDF: {exc}") from exc
+
+        pages = reader.pages if max_pages is None else reader.pages[:max_pages]
+        parts: list[str] = []
+        for page in pages:
+            try:
+                txt = page.extract_text() or ""
+            except Exception:
+                txt = ""
+            if txt.strip():
+                parts.append(txt.strip())
+        return "\n\n".join(parts)
+
     # ------------------------------------------------------------------
     # Phase 3 — Metadata helpers
     # ------------------------------------------------------------------
@@ -278,20 +309,29 @@ class ArxivToolClient:
 
         suffix = target_path.suffix.lower()
         if suffix == ".pdf":
-            return {
-                "status": "error",
-                "message": "PDF text extraction is not supported yet. Please read a Markdown (.md) paper.",
-                "relative_path": str(Path(relative_path)),
-            }
-        if suffix != ".md":
+            try:
+                content = self._extract_pdf_text(target_path)
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "message": f"PDF text extraction failed: {exc}",
+                    "relative_path": str(Path(relative_path)),
+                }
+            if not content.strip():
+                return {
+                    "status": "error",
+                    "message": "PDF contained no extractable text (likely scanned/image-only).",
+                    "relative_path": str(Path(relative_path)),
+                }
+        elif suffix == ".md":
+            with open(target_path, "r", encoding="utf-8", errors="replace") as handle:
+                content = handle.read()
+        else:
             return {
                 "status": "error",
                 "message": f"Unsupported file format: {suffix}. Supported formats: .md, .pdf",
                 "relative_path": str(Path(relative_path)),
             }
-
-        with open(target_path, "r", encoding="utf-8", errors="replace") as handle:
-            content = handle.read()
 
         total_chars = len(content)
         excerpt = content[offset: offset + max_chars]
@@ -325,20 +365,39 @@ class ArxivToolClient:
         if not target_path.exists() or not target_path.is_file():
             return {"status": "error", "message": f"File not found: {relative_path}"}
 
-        if target_path.suffix.lower() != ".md":
+        suffix = target_path.suffix.lower()
+        if suffix == ".md":
+            with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            sections = self._extract_sections(content)
+        elif suffix == ".pdf":
+            # PDF: extract full text. PDFs have no Markdown headings, so the
+            # section map is a single block — full_content still grounds the LLM.
+            try:
+                content = self._extract_pdf_text(target_path)
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "message": f"PDF text extraction failed: {exc}",
+                    "relative_path": str(Path(relative_path)),
+                }
+            if not content.strip():
+                return {
+                    "status": "error",
+                    "message": "PDF contained no extractable text (likely scanned/image-only).",
+                    "relative_path": str(Path(relative_path)),
+                }
+            sections = [{"title": "Full Text (PDF)", "content": content, "char_count": len(content)}]
+        else:
             return {
                 "status": "error",
-                "message": "Only .md files are supported for analysis. Download the HTML version first.",
+                "message": f"Unsupported file format: {suffix}. Supported formats: .md, .pdf",
                 "relative_path": str(Path(relative_path)),
             }
-
-        with open(target_path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
 
         rel = Path(relative_path)
         arxiv_id = target_path.stem
         category = rel.parts[0] if len(rel.parts) > 1 else "Unknown"
-        sections = self._extract_sections(content)
         section_map = [{"title": s["title"], "char_count": s["char_count"]} for s in sections]
 
         return {

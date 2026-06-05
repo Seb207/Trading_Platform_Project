@@ -5,3 +5,6 @@ markdownify
 # Phase 4 — semantic search (install when local paper library grows large)
 chromadb
 sentence-transformers
+
+# PDF text extraction (read_local_paper / analyze_local_paper for PDF-only papers)
+pypdf

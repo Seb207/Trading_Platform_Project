@@ -127,6 +127,7 @@ async function streamChat(
   config: LLMConfig,
   messages: { role: string; content: string }[],
   paperContext: { arxiv_id: string; relative_path: string } | null,
+  contentLevel: "abstract" | "full",
   onChunk: (chunk: string) => void,
   onDone:  (paperRefs: string[]) => void,
   onError: (msg: string) => void,
@@ -138,7 +139,7 @@ async function streamChat(
     ollama_url: config.ollamaUrl ?? "http://localhost:11434",
     messages,
     paper_context: paperContext
-      ? { arxiv_id: paperContext.arxiv_id, relative_path: paperContext.relative_path, content_level: "abstract" }
+      ? { arxiv_id: paperContext.arxiv_id, relative_path: paperContext.relative_path, content_level: contentLevel }
       : null,
   };
 
@@ -199,6 +200,7 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
   const [paperDetail,   setPaperDetail]   = useState<AnalyzeResult | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
   const [openSections,  setOpenSections]  = useState<Set<number>>(new Set());
+  const [contentLevel,  setContentLevel]  = useState<"abstract" | "full">("full");
 
   // Reset accordion when paper changes
   useEffect(() => { setOpenSections(new Set()); }, [selectedPaper?.arxiv_id]);
@@ -275,6 +277,7 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
       selectedPaper
         ? { arxiv_id: selectedPaper.arxiv_id, relative_path: selectedPaper.relative_path ?? "" }
         : null,
+      contentLevel,
       // onChunk — append to streaming message
       (chunk) => {
         setMessages((prev) =>
@@ -336,14 +339,37 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
             <ModelSelector config={config} onChange={setConfig} />
           </div>
 
-          {/* Paper context badge */}
+          {/* Paper context badge + grounding level toggle */}
           {selectedPaper && (
             <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border bg-accent/5">
               <span className="font-mono text-[9px] text-text-dim uppercase tracking-wide">Context:</span>
               <span className="font-mono text-[9px] text-accent">{selectedPaper.arxiv_id}</span>
-              <span className="text-[10px] text-text-mid truncate">
-                {selectedPaper.title.slice(0, 38)}…
+              <span className="text-[10px] text-text-mid truncate flex-1">
+                {selectedPaper.title.slice(0, 30)}…
               </span>
+
+              {/* Abstract / Full-paper grounding toggle */}
+              <div className="flex items-center gap-0.5 flex-shrink-0 border border-border rounded-sm overflow-hidden">
+                {(["abstract", "full"] as const).map((lvl) => (
+                  <button
+                    key={lvl}
+                    onClick={() => setContentLevel(lvl)}
+                    title={
+                      lvl === "full"
+                        ? "Inject full paper text into the LLM (higher token cost, deeper answers)"
+                        : "Inject only the abstract (cheaper, quick questions)"
+                    }
+                    className={[
+                      "px-2 py-0.5 font-mono text-[8px] uppercase tracking-wide transition-colors",
+                      contentLevel === lvl
+                        ? "bg-accent/15 text-accent"
+                        : "text-text-dim hover:text-text",
+                    ].join(" ")}
+                  >
+                    {lvl === "full" ? "Full" : "Abstract"}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
