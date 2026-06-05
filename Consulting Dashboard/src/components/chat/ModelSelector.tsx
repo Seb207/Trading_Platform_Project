@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLLM } from "@/context/LLMContext";
 import type { LLMConfig, LLMProvider } from "@/lib/types";
 
@@ -15,6 +15,103 @@ interface ModelSelectorProps {
   onChange: (config: LLMConfig) => void;
 }
 
+/* ── Reusable custom dropdown ── */
+interface DropdownProps {
+  value: string;
+  options: string[];
+  onSelect: (v: string) => void;
+  accent?: "accent" | "accent2";
+  placeholder?: string;
+}
+
+function Dropdown({ value, options, onSelect, accent = "accent", placeholder = "—" }: DropdownProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const accentColor  = accent === "accent" ? "#00ff88" : "#00cfff";
+  const accentClass  = accent === "accent"
+    ? "border-accent  text-accent  focus:border-accent"
+    : "border-accent2 text-accent2 focus:border-accent2";
+  const hoverBg      = accent === "accent" ? "hover:bg-accent/8" : "hover:bg-accent2/8";
+  const activeBg     = accent === "accent" ? "bg-accent/10"      : "bg-accent2/10";
+  const activeText   = accent === "accent" ? "text-accent"       : "text-accent2";
+
+  return (
+    <div ref={ref} className="relative w-full">
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={[
+          "w-full flex items-center justify-between gap-2",
+          "bg-bg3 border rounded-sm px-3 py-1.5",
+          "font-mono text-[11px] text-text",
+          "transition-colors duration-100 outline-none",
+          open ? accentClass : "border-border hover:border-border2",
+        ].join(" ")}
+      >
+        <span className={value ? "text-text" : "text-text-dim"}>
+          {value || placeholder}
+        </span>
+        {/* Chevron */}
+        <svg
+          width="10" height="10" viewBox="0 0 10 10" fill="none"
+          style={{
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 150ms",
+            color: open ? accentColor : "#555",
+            flexShrink: 0,
+          }}
+        >
+          <path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+
+      {/* Options list */}
+      {open && options.length > 0 && (
+        <div
+          className="absolute z-50 w-full mt-1 bg-bg2 border border-border2 rounded-sm overflow-hidden"
+          style={{ boxShadow: `0 4px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(${accent === "accent" ? "0,255,136" : "0,207,255"},0.08)` }}
+        >
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => { onSelect(opt); setOpen(false); }}
+              className={[
+                "w-full text-left px-3 py-1.5 font-mono text-[11px]",
+                "border-b border-border last:border-b-0",
+                "transition-colors duration-75",
+                opt === value
+                  ? `${activeBg} ${activeText}`
+                  : `text-text-mid ${hoverBg} hover:text-text`,
+              ].join(" ")}
+            >
+              {opt}
+              {opt === value && (
+                <span className="float-right text-[9px] opacity-60">✓</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Main component ── */
 export default function ModelSelector({ config, onChange }: ModelSelectorProps) {
   const { setConfig: setGlobalConfig } = useLLM();
   const [expanded,      setExpanded]      = useState(false);
@@ -42,7 +139,6 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
           (m: { name: string }) => m.name,
         );
         setOllamaModels(names);
-        // Auto-select first model if current model isn't in the list
         if (names.length > 0 && !names.includes(config.model)) {
           onChange({ ...config, model: names[0] });
         }
@@ -59,17 +155,33 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
     const model = provider === "claude" ? CLAUDE_MODELS[0] : (ollamaModels[0] ?? "");
     const updated = { ...config, provider, model };
     onChange(updated);
-    setGlobalConfig(updated);   // sync TopBar
+    setGlobalConfig(updated);
   };
 
   const saveAndCollapse = () => {
     const updated = { ...config, apiKey, ollamaUrl };
     onChange(updated);
-    setGlobalConfig(updated);   // sync TopBar
+    setGlobalConfig(updated);
     setExpanded(false);
   };
 
-  const models = config.provider === "claude" ? CLAUDE_MODELS : ollamaModels;
+  const refreshOllama = () => {
+    setOllamaModels([]);
+    setOllamaError(null);
+    setOllamaLoading(true);
+    const url = ollamaUrl.replace(/\/$/, "");
+    fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(4000) })
+      .then((r) => r.json())
+      .then((data) => {
+        const names: string[] = (data.models ?? []).map(
+          (m: { name: string }) => m.name,
+        );
+        setOllamaModels(names);
+        if (names.length > 0) onChange({ ...config, ollamaUrl, model: names[0] });
+      })
+      .catch(() => setOllamaError("Ollama not running"))
+      .finally(() => setOllamaLoading(false));
+  };
 
   return (
     <div className="border-b border-border">
@@ -98,11 +210,50 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
           {config.model || (ollamaLoading ? "loading…" : "—")}
         </span>
 
-        {/* Status dot */}
-        <span
-          className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
-          style={{ background: "#00ff88", boxShadow: "0 0 4px #00ff88" }}
-        />
+        {/* Status dot — reflects actual connection state */}
+        {(() => {
+          if (config.provider === "claude") {
+            const ready = !!config.apiKey && config.apiKey.startsWith("sk-ant-");
+            return (
+              <span
+                className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
+                title={ready ? "API key configured" : "API key not set"}
+                style={
+                  ready
+                    ? { background: "#00ff88", boxShadow: "0 0 4px #00ff88" }
+                    : { background: "#555", boxShadow: "none" }
+                }
+              />
+            );
+          } else {
+            if (ollamaLoading) {
+              return (
+                <span
+                  className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse"
+                  title="Connecting to Ollama…"
+                  style={{ background: "#f5a623", boxShadow: "0 0 4px #f5a623" }}
+                />
+              );
+            }
+            if (ollamaError || ollamaModels.length === 0) {
+              return (
+                <span
+                  className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  title={ollamaError ?? "No models installed"}
+                  style={{ background: "#ff4444", boxShadow: "0 0 4px #ff4444" }}
+                />
+              );
+            }
+            return (
+              <span
+                className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
+                title="Ollama connected"
+                style={{ background: "#00ff88", boxShadow: "0 0 4px #00ff88" }}
+              />
+            );
+          }
+        })()}
+
         <span className="text-text-dim text-[10px]">{expanded ? "▲" : "▼"}</span>
       </button>
 
@@ -136,15 +287,12 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
             <>
               <div>
                 <p className="font-mono text-[9px] text-text-dim tracking-widest mb-1.5 uppercase">Model</p>
-                <select
+                <Dropdown
                   value={config.model}
-                  onChange={(e) => onChange({ ...config, model: e.target.value })}
-                  className="w-full bg-bg3 border border-border rounded-sm px-3 py-1.5 font-mono text-[11px] text-text outline-none focus:border-accent"
-                >
-                  {CLAUDE_MODELS.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
+                  options={CLAUDE_MODELS}
+                  onSelect={(m) => onChange({ ...config, model: m })}
+                  accent="accent"
+                />
               </div>
 
               <div>
@@ -171,7 +319,6 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
           {/* ── Ollama section ── */}
           {config.provider === "ollama" && (
             <>
-              {/* Ollama server URL */}
               <div>
                 <p className="font-mono text-[9px] text-text-dim tracking-widest mb-1.5 uppercase">
                   Ollama URL
@@ -184,24 +331,7 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
                     className="flex-1 bg-bg3 border border-border rounded-sm px-3 py-1.5 font-mono text-[11px] text-text outline-none focus:border-accent2"
                   />
                   <button
-                    onClick={() => {
-                      // Manually trigger re-fetch by toggling a temp state
-                      setOllamaModels([]);
-                      setOllamaError(null);
-                      setOllamaLoading(true);
-                      const url = ollamaUrl.replace(/\/$/, "");
-                      fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(4000) })
-                        .then((r) => r.json())
-                        .then((data) => {
-                          const names: string[] = (data.models ?? []).map(
-                            (m: { name: string }) => m.name,
-                          );
-                          setOllamaModels(names);
-                          if (names.length > 0) onChange({ ...config, ollamaUrl, model: names[0] });
-                        })
-                        .catch(() => setOllamaError("Ollama not running"))
-                        .finally(() => setOllamaLoading(false));
-                    }}
+                    onClick={refreshOllama}
                     className="px-3 py-1.5 border border-accent2 text-accent2 font-mono text-[10px] rounded-sm hover:bg-accent2/10 transition-colors whitespace-nowrap"
                   >
                     ↺ Refresh
@@ -209,21 +339,16 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
                 </div>
               </div>
 
-              {/* Model selector — local models only */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <p className="font-mono text-[9px] text-text-dim tracking-widest uppercase">
                     Installed Models
                   </p>
                   {ollamaLoading && (
-                    <span className="font-mono text-[9px] text-accent2 animate-pulse">
-                      loading…
-                    </span>
+                    <span className="font-mono text-[9px] text-accent2 animate-pulse">loading…</span>
                   )}
                   {!ollamaLoading && !ollamaError && ollamaModels.length > 0 && (
-                    <span className="font-mono text-[9px] text-text-dim">
-                      {ollamaModels.length} models
-                    </span>
+                    <span className="font-mono text-[9px] text-text-dim">{ollamaModels.length} models</span>
                   )}
                 </div>
 
@@ -240,26 +365,19 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
                 {/* Empty state */}
                 {!ollamaLoading && !ollamaError && ollamaModels.length === 0 && (
                   <div className="bg-bg3 border border-border rounded-sm px-3 py-2">
-                    <p className="font-mono text-[10px] text-text-dim">
-                      No models installed.
-                    </p>
-                    <p className="font-mono text-[9px] text-text-dim mt-0.5">
-                      ollama pull gemma3:27b
-                    </p>
+                    <p className="font-mono text-[10px] text-text-dim">No models installed.</p>
+                    <p className="font-mono text-[9px] text-text-dim mt-0.5">ollama pull gemma3:27b</p>
                   </div>
                 )}
 
-                {/* Model list */}
+                {/* Custom model dropdown */}
                 {ollamaModels.length > 0 && (
-                  <select
+                  <Dropdown
                     value={config.model}
-                    onChange={(e) => onChange({ ...config, model: e.target.value })}
-                    className="w-full bg-bg3 border border-border rounded-sm px-3 py-1.5 font-mono text-[11px] text-text outline-none focus:border-accent2"
-                  >
-                    {ollamaModels.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                    options={ollamaModels}
+                    onSelect={(m) => onChange({ ...config, model: m })}
+                    accent="accent2"
+                  />
                 )}
               </div>
 

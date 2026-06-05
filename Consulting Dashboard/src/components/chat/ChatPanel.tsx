@@ -1,14 +1,118 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ModelSelector from "./ModelSelector";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
+import MarkdownRenderer from "@/components/research/MarkdownRenderer";
 import { analyzePaper } from "@/lib/api";
 import type { AnalyzeResult } from "@/lib/api";
 import type { ChatMessage as ChatMessageType, LLMConfig, Paper } from "@/lib/types";
 
 type ChatTab = "chat" | "viewer" | "strategy";
+
+// ── Section parser ─────────────────────────────────────────────────────
+interface ParsedSection {
+  title:   string;
+  level:   number;   // 1 = #, 2 = ##, 3 = ###
+  content: string;
+  chars:   number;
+}
+
+function parseSections(fullContent: string): ParsedSection[] {
+  // Split on markdown headings (# / ## / ###)
+  const lines   = fullContent.split("\n");
+  const sections: ParsedSection[] = [];
+  let cur: ParsedSection | null   = null;
+
+  for (const line of lines) {
+    const m = line.match(/^(#{1,3})\s+(.+)/);
+    if (m) {
+      if (cur) {
+        cur.content = cur.content.trimEnd();
+        cur.chars   = cur.content.length;
+        sections.push(cur);
+      }
+      cur = { title: m[2].trim(), level: m[1].length, content: "", chars: 0 };
+    } else if (cur) {
+      cur.content += line + "\n";
+    }
+  }
+  if (cur) {
+    cur.content = cur.content.trimEnd();
+    cur.chars   = cur.content.length;
+    sections.push(cur);
+  }
+  return sections;
+}
+
+// ── Section accordion item ─────────────────────────────────────────────
+function SectionItem({
+  section,
+  index,
+  isOpen,
+  onToggle,
+}: {
+  section:  ParsedSection;
+  index:    number;
+  isOpen:   boolean;
+  onToggle: (i: number) => void;
+}) {
+  const sizeLabel =
+    section.chars > 1000
+      ? `${(section.chars / 1000).toFixed(1)}k`
+      : `${section.chars}`;
+
+  return (
+    <div className="border-b border-border/50 last:border-b-0">
+      {/* Header row — always rendered */}
+      <button
+        type="button"
+        onClick={() => onToggle(index)}
+        className="w-full flex items-center gap-2 py-2 px-0 text-left group transition-colors duration-75 hover:bg-bg3/40"
+      >
+        {/* Level indent */}
+        {section.level > 1 && (
+          <span
+            className="flex-shrink-0 w-px self-stretch bg-border/60"
+            style={{ marginLeft: (section.level - 1) * 10 }}
+          />
+        )}
+
+        {/* Chevron */}
+        <svg
+          width="10" height="10" viewBox="0 0 10 10" fill="none"
+          className="flex-shrink-0 transition-transform duration-150"
+          style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          <path d="M3 2L7 5L3 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
+            className={isOpen ? "text-accent" : "text-text-dim group-hover:text-text-mid"} />
+        </svg>
+
+        {/* Title */}
+        <span
+          className={[
+            "flex-1 font-mono truncate transition-colors duration-75",
+            section.level === 1 ? "text-[11px] text-text" : "text-[10px] text-text-mid",
+            isOpen ? "text-accent" : "group-hover:text-text",
+          ].join(" ")}
+        >
+          {section.title}
+        </span>
+
+        {/* Size badge */}
+        <span className="flex-shrink-0 font-mono text-[9px] text-text-dim">{sizeLabel}</span>
+      </button>
+
+      {/* Content — only mounted when open (memory-efficient) */}
+      {isOpen && section.content && (
+        <div className="pb-3 pl-4 pr-2">
+          <MarkdownRenderer content={section.content} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 const TABS: { id: ChatTab; label: string }[] = [
   { id: "chat",     label: "LLM Chat"     },
@@ -92,8 +196,29 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
     provider: "claude",
     model:    "claude-opus-4-5",
   });
-  const [paperDetail,  setPaperDetail]  = useState<AnalyzeResult | null>(null);
+  const [paperDetail,   setPaperDetail]   = useState<AnalyzeResult | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
+  const [openSections,  setOpenSections]  = useState<Set<number>>(new Set());
+
+  // Reset accordion when paper changes
+  useEffect(() => { setOpenSections(new Set()); }, [selectedPaper?.arxiv_id]);
+
+  // Parse sections from full_content — memoized so re-renders don't re-parse
+  const parsedSections = useMemo(
+    () => (paperDetail?.full_content ? parseSections(paperDetail.full_content) : []),
+    [paperDetail?.full_content],
+  );
+
+  const toggleSection = useCallback((i: number) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      next.has(i) ? next.delete(i) : next.add(i);
+      return next;
+    });
+  }, []);
+
+  const expandAll  = useCallback(() => setOpenSections(new Set(parsedSections.map((_, i) => i))), [parsedSections]);
+  const collapseAll = useCallback(() => setOpenSections(new Set()), []);
   const bottomRef      = useRef<HTMLDivElement>(null);
   const streamingIdRef = useRef<string | null>(null); // ID of the assistant message being built
 
@@ -261,7 +386,8 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
 
       {/* ── Paper Viewer tab ── */}
       {activeTab === "viewer" && (
-        <div className="flex flex-col flex-1 overflow-y-auto px-5 py-4 gap-4">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* No paper selected */}
           {!selectedPaper && (
             <div className="flex flex-col items-center justify-center flex-1 gap-2">
               <span className="font-mono text-[10px] text-text-dim uppercase tracking-widest">No Paper Selected</span>
@@ -269,8 +395,9 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
             </div>
           )}
 
+          {/* Loading skeleton */}
           {selectedPaper && viewerLoading && (
-            <div className="flex flex-col gap-3 animate-pulse">
+            <div className="flex flex-col gap-3 px-5 py-4 animate-pulse">
               <div className="h-3 bg-bg3 rounded w-1/3" />
               <div className="h-4 bg-bg3 rounded w-4/5" />
               <div className="h-4 bg-bg3 rounded w-3/5" />
@@ -281,51 +408,81 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
           )}
 
           {selectedPaper && !viewerLoading && (
-            <>
-              {/* Header */}
-              <div>
+            <div className="flex flex-col flex-1 overflow-y-auto">
+              {/* Sticky header */}
+              <div className="flex-shrink-0 px-5 pt-4 pb-3 border-b border-border bg-bg">
                 <span className="font-mono text-[9px] text-accent2 tracking-widest uppercase">
                   {selectedPaper.arxiv_id} · {selectedPaper.category}
                 </span>
                 <h2 className="text-[13px] text-text font-medium leading-snug mt-1">
                   {selectedPaper.title}
                 </h2>
+
+                {/* Abstract — always visible in header area */}
+                {selectedPaper.abstract && (
+                  <p className="mt-2 text-[10px] text-text-mid leading-relaxed line-clamp-3">
+                    {selectedPaper.abstract}
+                  </p>
+                )}
               </div>
 
-              {/* Abstract */}
-              <div className="border-t border-border pt-3">
-                <span className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-2 block">Abstract</span>
-                <p className="text-[11px] text-text-mid leading-relaxed">
-                  {selectedPaper.abstract || "Abstract not available."}
-                </p>
-              </div>
+              {/* Sections accordion */}
+              {parsedSections.length > 0 && (
+                <div className="flex flex-col flex-1 overflow-y-auto">
+                  {/* Toolbar */}
+                  <div className="flex items-center justify-between px-5 py-1.5 border-b border-border/50 bg-bg2 flex-shrink-0">
+                    <span className="font-mono text-[9px] text-text-dim tracking-widest uppercase">
+                      {parsedSections.length} sections · {openSections.size} open
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={expandAll}
+                        className="font-mono text-[9px] text-text-dim hover:text-accent transition-colors"
+                      >
+                        expand all
+                      </button>
+                      <span className="text-text-dim text-[9px]">/</span>
+                      <button
+                        type="button"
+                        onClick={collapseAll}
+                        className="font-mono text-[9px] text-text-dim hover:text-accent transition-colors"
+                      >
+                        collapse all
+                      </button>
+                    </div>
+                  </div>
 
-              {/* Section map */}
-              {paperDetail && paperDetail.section_map.length > 0 && (
-                <div className="border-t border-border pt-3">
-                  <span className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-2 block">
-                    Sections ({paperDetail.section_count})
-                  </span>
-                  <div className="flex flex-col gap-1">
-                    {paperDetail.section_map.map((s, i) => (
-                      <div key={i} className="flex items-center justify-between gap-3 py-1 border-b border-border/40">
-                        <span className="text-[11px] text-text truncate">{s.title}</span>
-                        <span className="font-mono text-[9px] text-text-dim flex-shrink-0">
-                          {(s.char_count / 1000).toFixed(1)}k
-                        </span>
-                      </div>
+                  {/* Section list */}
+                  <div className="px-5 py-1 overflow-y-auto">
+                    {parsedSections.map((section, i) => (
+                      <SectionItem
+                        key={i}
+                        section={section}
+                        index={i}
+                        isOpen={openSections.has(i)}
+                        onToggle={toggleSection}
+                      />
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* No .md available */}
+              {/* No markdown available */}
               {!paperDetail && (
-                <p className="text-[11px] text-text-dim">
-                  Section map unavailable — PDF-only paper or not yet downloaded as Markdown.
+                <p className="px-5 py-4 text-[11px] text-text-dim">
+                  Section content unavailable — PDF-only paper or not yet downloaded as Markdown.
                 </p>
               )}
-            </>
+
+              {/* Markdown fetched but no sections parsed */}
+              {paperDetail && parsedSections.length === 0 && (
+                <div className="px-5 py-4">
+                  <span className="font-mono text-[9px] text-text-dim tracking-widest uppercase mb-2 block">Full Content</span>
+                  <MarkdownRenderer content={paperDetail.full_content} />
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
