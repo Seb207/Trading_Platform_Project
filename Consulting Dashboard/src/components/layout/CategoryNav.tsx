@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const CATEGORIES = [
-  { label: "Research LLM", href: "/research" },
+  { label: "Paper2Alpha", href: "/research" },
   { label: "Market Regime", href: "/regime" },
   { label: "Portfolio", href: "/portfolio" },
   { label: "Factor Research", href: "/factor" },

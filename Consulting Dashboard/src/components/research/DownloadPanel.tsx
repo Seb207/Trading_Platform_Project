@@ -48,7 +48,7 @@ export default function DownloadPanel() {
   const [category,   setCategory]   = useState("");
   const [dateFrom,   setDateFrom]   = useState("");
   const [dateTo,     setDateTo]     = useState("");
-  const [maxResults, setMaxResults] = useState(10);
+  const [maxResults, setMaxResults] = useState("10");
   const [autoIndex,  setAutoIndex]  = useState(true);
 
   // Preview state
@@ -89,7 +89,7 @@ export default function DownloadPanel() {
           category,
           date_from: dateFrom,
           date_to: dateTo,
-          max_results: maxResults,
+          max_results: Math.max(1, Math.min(50, parseInt(maxResults, 10) || 10)),
         }),
       });
       if (!res.ok) {
@@ -294,7 +294,16 @@ export default function DownloadPanel() {
                 min={1}
                 max={50}
                 value={maxResults}
-                onChange={(e) => setMaxResults(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+                onChange={(e) => {
+                  // Allow free editing (incl. empty) — only keep digits, no clamping here
+                  const v = e.target.value.replace(/[^0-9]/g, "");
+                  setMaxResults(v);
+                }}
+                onBlur={() => {
+                  // Normalize to [1, 50] when the field loses focus
+                  const n = Math.max(1, Math.min(50, parseInt(maxResults, 10) || 10));
+                  setMaxResults(String(n));
+                }}
                 className="w-24 bg-bg3 border border-border rounded-sm px-3 py-1.5 font-mono text-[11px] text-text outline-none focus:border-accent"
               />
             </div>

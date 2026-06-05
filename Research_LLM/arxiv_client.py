@@ -22,12 +22,19 @@ class ArxivToolClient:
     _API_MAX_RETRIES: int = 3
     _API_BASE_DELAY:  float = 30.0   # 30s → 60s → give up
 
+    # Identifying User-Agent — arXiv throttles anonymous/UA-less requests more
+    # aggressively. A descriptive UA reduces rate limiting on both the API and
+    # the content servers (arxiv.org/html, arxiv.org/pdf).
+    _USER_AGENT: str = (
+        "ResearchLLM/1.0 (academic paper research; contact: local-user)"
+    )
+
     def __init__(self, download_dir: str):
         self.download_dir = download_dir
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir, exist_ok=True)
 
-        self.api_url = "http://export.arxiv.org/api/query"
+        self.api_url = "https://export.arxiv.org/api/query"
         self.html_url_base = "https://arxiv.org/html"
         self.pdf_url_base = "https://arxiv.org/pdf"
         self._last_api_call: float = 0.0   # timestamp of the last arXiv API call
@@ -52,7 +59,8 @@ class ArxivToolClient:
             self._last_api_call = time.time()
 
             try:
-                with urllib.request.urlopen(url, timeout=30) as response:
+                req = urllib.request.Request(url, headers={"User-Agent": self._USER_AGENT})
+                with urllib.request.urlopen(req, timeout=30) as response:
                     return response.read().decode("utf-8")
 
             except urllib.error.HTTPError as exc:
@@ -457,19 +465,52 @@ class ArxivToolClient:
 
         return self._parse_entries(xml_data)
 
-    def download_paper(self, arxiv_id: str, category: str = "Unknown") -> dict:
+    def download_paper(
+        self,
+        arxiv_id: str,
+        category: str = "Unknown",
+        fetch_metadata: bool = True,
+        skip_existing: bool = True,
+    ) -> dict:
         """
         Download an arXiv paper (HTML→Markdown preferred, PDF fallback).
-        Automatically saves metadata to metadata.json after a successful download.
+
+        Args:
+            arxiv_id: arXiv paper ID.
+            category: category for folder organisation.
+            fetch_metadata: when True, fetch+save this paper's metadata via a
+                per-paper arXiv API call. Set False for bulk downloads and call
+                backfill_metadata() once afterwards — that batches 50 IDs per API
+                call instead of firing one call per paper (the per-paper pattern
+                hammers export.arxiv.org and triggers rate limiting).
+            skip_existing: when True, skip the network download entirely if the
+                paper already exists locally (.md or .pdf) — saves a content-server
+                round trip on re-runs.
         """
         safe_category = category.replace("/", "_").replace("\\", "_")
         category_dir = os.path.join(self.download_dir, safe_category)
         os.makedirs(category_dir, exist_ok=True)
 
+        # Skip if already downloaded (avoids redundant content-server requests on re-runs)
+        if skip_existing:
+            for ext, fmt in ((".md", "markdown"), (".pdf", "pdf")):
+                existing = os.path.join(category_dir, f"{arxiv_id}{ext}")
+                if os.path.exists(existing):
+                    return {
+                        "status": "success",
+                        "format": fmt,
+                        "file_path": existing,
+                        "category": category,
+                        "skipped": True,
+                        "message": f"Already downloaded — skipped: {existing}",
+                    }
+
+        _headers = {"User-Agent": self._USER_AGENT}
+
         # Step 1: Try HTML
         html_url = f"{self.html_url_base}/{arxiv_id}"
         try:
-            response = requests.get(html_url, timeout=10)
+            response = requests.get(html_url, timeout=10, headers=_headers)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, "html.parser")
 
@@ -491,7 +532,8 @@ class ArxivToolClient:
                         f.write(md_text)
 
                     rel_path = str(Path(file_path).relative_to(self.download_dir))
-                    self._fetch_and_save_metadata(arxiv_id, category, "md", rel_path)
+                    if fetch_metadata:
+                        self._fetch_and_save_metadata(arxiv_id, category, "md", rel_path)
 
                     return {
                         "status": "success",
@@ -506,7 +548,7 @@ class ArxivToolClient:
         # Step 2: PDF fallback
         pdf_url = f"{self.pdf_url_base}/{arxiv_id}.pdf"
         try:
-            response = requests.get(pdf_url, stream=True, timeout=20)
+            response = requests.get(pdf_url, stream=True, timeout=20, headers=_headers)
             if response.status_code == 200:
                 file_path = os.path.join(category_dir, f"{arxiv_id}.pdf")
                 with open(file_path, "wb") as f:
@@ -514,7 +556,8 @@ class ArxivToolClient:
                         f.write(chunk)
 
                 rel_path = str(Path(file_path).relative_to(self.download_dir))
-                self._fetch_and_save_metadata(arxiv_id, category, "pdf", rel_path)
+                if fetch_metadata:
+                    self._fetch_and_save_metadata(arxiv_id, category, "pdf", rel_path)
 
                 return {
                     "status": "success",
@@ -567,11 +610,24 @@ class ArxivToolClient:
         Each paper is downloaded and its metadata saved automatically.
 
         Returns a result list with one entry per arxiv_id.
+
+        Metadata is fetched in a SINGLE batched pass (backfill_metadata, 50 IDs
+        per API call) after all downloads complete — not one API call per paper.
+        This keeps export.arxiv.org request volume ~50x lower and avoids the
+        rate limiting that the per-paper pattern triggers.
         """
         results = []
         for arxiv_id in arxiv_ids:
-            result = self.download_paper(arxiv_id, category)
+            # fetch_metadata=False → defer to the single batched backfill below
+            result = self.download_paper(arxiv_id, category, fetch_metadata=False)
             results.append({"arxiv_id": arxiv_id, **result})
+
+        # One batched metadata pass for everything just downloaded
+        try:
+            self.backfill_metadata()
+        except Exception as e:
+            print(f"[bulk_download] batched metadata backfill failed: {e}")
+
         return results
 
     def backfill_metadata(self) -> dict:

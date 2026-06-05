@@ -322,7 +322,11 @@ async def _download_stream(req: DownloadRequest) -> AsyncGenerator[str, None]:
     for i, arxiv_id in enumerate(req.arxiv_ids):
         yield _sse({"type": "paper_start", "arxiv_id": arxiv_id, "index": i + 1, "total": total})
         try:
-            result = await asyncio.to_thread(client.download_paper, arxiv_id, req.category)
+            # fetch_metadata=False → no per-paper API call; metadata is backfilled
+            # in a single batched pass after all downloads complete (see below).
+            result = await asyncio.to_thread(
+                client.download_paper, arxiv_id, req.category, False
+            )
             if result.get("status") == "success":
                 downloaded += 1
                 yield _sse({
@@ -342,8 +346,10 @@ async def _download_stream(req: DownloadRequest) -> AsyncGenerator[str, None]:
             failed += 1
             yield _sse({"type": "paper_error", "arxiv_id": arxiv_id, "message": str(exc)})
 
-    if req.auto_index and downloaded > 0:
-        # Step 1 — backfill metadata
+    # Metadata backfill ALWAYS runs after downloads (batched, cheap, and required
+    # for titles/abstracts to appear). Independent of auto_index, which only
+    # controls the expensive embedding steps below.
+    if downloaded > 0:
         yield _sse({"type": "step", "name": "backfill", "message": "Updating metadata.json…"})
         try:
             r = await asyncio.to_thread(client.backfill_metadata)
@@ -351,6 +357,7 @@ async def _download_stream(req: DownloadRequest) -> AsyncGenerator[str, None]:
         except Exception as exc:
             yield _sse({"type": "step_error", "name": "backfill", "message": str(exc)})
 
+    if req.auto_index and downloaded > 0:
         # Step 2 — abstract embeddings
         yield _sse({"type": "step", "name": "abstract_index", "message": "Building abstract search index…"})
         try:

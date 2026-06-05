@@ -21,12 +21,42 @@ This two-tier approach scales to thousands of papers while minimising LLM token 
 
 ---
 
+## arXiv API Efficiency (download vs metadata)
+
+Downloads and metadata hit **different arXiv hosts** that throttle independently:
+
+- **Content server** (`arxiv.org/html`, `arxiv.org/pdf`) — the paper body. Rarely throttled.
+- **Metadata/search API** (`export.arxiv.org/api/query`) — throttles aggressively under load.
+
+`download_paper` therefore separates the two concerns:
+
+```python
+download_paper(arxiv_id, category="Unknown",
+               fetch_metadata=True,   # set False in bulk → no per-paper API call
+               skip_existing=True)    # skip network entirely if file already exists
+```
+
+| Parameter | Purpose |
+|---|---|
+| `fetch_metadata=False` | Bulk/dashboard downloads skip the per-paper metadata API call; metadata is filled afterwards in **one batched `backfill_metadata`** pass (50 IDs/call) — ~50× fewer API hits |
+| `skip_existing=True` | Re-runs skip already-downloaded papers instantly (no content-server request) |
+
+`bulk_download_papers` uses `fetch_metadata=False` internally and runs a single
+batched backfill at the end. The API client also sends a descriptive **User-Agent**
+on all requests (API and content) and calls `https://export.arxiv.org` directly.
+
+> **Titles don't require the API.** HTML-downloaded `.md` files already contain the
+> title (first `# ` heading), authors, and abstract. These can be parsed locally;
+> only the `published` date needs the API. The API path is a fallback for PDF-only papers.
+
+---
+
 ## MCP Tools (11 total)
 
 | Tool | Phase | Description |
 |---|---|---|
 | `search_arxiv_papers` | 1 | Search arXiv by keyword + optional date range |
-| `download_arxiv_paper` | 1 | Download one paper (HTML→Markdown, PDF fallback) |
+| `download_arxiv_paper` | 1 | Download one paper (HTML→Markdown, PDF fallback). Skips if already downloaded |
 | `list_local_papers` | 1 | List locally saved papers, filterable by category |
 | `read_local_paper` | 1 | Read a local `.md` paper with pagination |
 | `analyze_local_paper` | 2 | Full paper + section map for strategy generation |
@@ -91,6 +121,7 @@ search_sections_by_topic("rebalancing frequency", arxiv_id="2401.12345")
 ```text
 Research_LLM/                       # Project root
 ├── arxiv_client.py                 # Core logic: API calls, HTML parsing, metadata, ChromaDB
+│                                    #   (skip_existing + fetch_metadata flags, batched backfill)
 ├── mcp_server.py                   # FastMCP server — exposes 11 tools to the LLM
 ├── tests/
 │   └── test_local_paper_tools.py   # Unit tests (all features covered, no network calls)
@@ -334,9 +365,13 @@ LLM reads Top 5 sections → answer
 - [x] arXiv API rate limiting — 3 s minimum interval between calls
 - [x] arXiv API retry — exponential backoff on 429/503/timeout (30 s → 60 s)
 - [x] Dashboard integration via `arxiv_bridge.py` (no code duplication)
+- [x] **API efficiency refactor** — `fetch_metadata` decoupling + batched backfill (~50× fewer API calls)
+- [x] **`skip_existing`** — re-runs skip already-downloaded papers
+- [x] HTTPS direct (`https://export.arxiv.org`) + descriptive User-Agent on all requests
+- [x] Local metadata extraction — title/abstract parsed from `.md` (no API needed)
 
 ### Later
-- [ ] PDF text extraction for `read_local_paper` (for papers without HTML)
+- [ ] PDF text extraction for `read_local_paper` (for papers without HTML) — also fills metadata for PDF-only papers
 - [ ] BM25 hybrid search layer (for 1,000+ paper libraries)
 - [ ] CrossEncoder reranker integration
 - [ ] Incremental index updates on download (auto-trigger section index upsert)
