@@ -11,6 +11,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.modules.llm.factory import get_provider
+from backend.modules.llm.prompt_loader import (
+    list_task_prompts,
+    load_prompt_fragments,
+    load_task_prompt,
+)
 from backend.modules.research.arxiv_bridge import get_client
 
 router = APIRouter(tags=["chat"])
@@ -36,6 +41,7 @@ class ChatRequest(BaseModel):
     ollama_url: str = "http://localhost:11434"
     messages:   list[MessageItem]
     paper_context: Optional[PaperContext] = None
+    task:       str = ""                   # task-mode id (prompts/tasks/<id>.md); "" = none
 
 
 # ── System prompt builder ───────────────────────────────────────────────
@@ -48,6 +54,16 @@ def _build_system(req: ChatRequest) -> str:
         "include inline comments explaining each step."
     )
 
+    # Inject user-authored prompt fragments from backend/prompts/ (read fresh
+    # each request, so newly-added files take effect without a restart).
+    custom = load_prompt_fragments()
+    base = f"{base}\n\n{custom}" if custom else base
+
+    # Inject the selected task-mode prompt (prompts/tasks/<task>.md). When no
+    # mode is selected (req.task == ""), nothing extra is injected.
+    task_prompt = load_task_prompt(req.task)
+    base = f"{base}\n\n{task_prompt}" if task_prompt else base
+
     if not req.paper_context:
         return base
 
@@ -55,7 +71,15 @@ def _build_system(req: ChatRequest) -> str:
     arxiv_client = get_client()
 
     if ctx.content_level == "full":
-        result = arxiv_client.analyze_local_paper(relative_path=ctx.relative_path)
+        # relative_path may be empty when the paper was found via ChromaDB abstract
+        # search (the index stores "" as a fallback).  Try to recover it from
+        # metadata.json, which always records the path after download.
+        relative_path = ctx.relative_path
+        if not relative_path:
+            meta_all = arxiv_client._load_metadata()
+            relative_path = meta_all.get(ctx.arxiv_id, {}).get("relative_path", "")
+
+        result = arxiv_client.analyze_local_paper(relative_path=relative_path)
         if result.get("status") == "success":
             # Cap paper text by provider context budget:
             #   Claude  → 200k-token window, cap ~120k chars (~90k tokens)
@@ -119,6 +143,12 @@ async def _event_stream(req: ChatRequest) -> AsyncGenerator[str, None]:
 
 
 # ── Endpoint ────────────────────────────────────────────────────────────
+
+@router.get("/api/chat/tasks")
+def chat_tasks():
+    """List available task-mode prompts (files in prompts/tasks/)."""
+    return {"tasks": list_task_prompts()}
+
 
 @router.post("/api/chat")
 async def chat(req: ChatRequest):

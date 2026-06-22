@@ -128,6 +128,7 @@ async function streamChat(
   messages: { role: string; content: string }[],
   paperContext: { arxiv_id: string; relative_path: string } | null,
   contentLevel: "abstract" | "full",
+  task: string,
   onChunk: (chunk: string) => void,
   onDone:  (paperRefs: string[]) => void,
   onError: (msg: string) => void,
@@ -135,12 +136,15 @@ async function streamChat(
   const body = {
     provider:   config.provider,
     model:      config.model,
-    api_key:    config.apiKey ?? "",
+    api_key:    config.provider === "openrouter"
+      ? (config.openRouterApiKey ?? "")
+      : (config.apiKey ?? ""),
     ollama_url: config.ollamaUrl ?? "http://localhost:11434",
     messages,
     paper_context: paperContext
       ? { arxiv_id: paperContext.arxiv_id, relative_path: paperContext.relative_path, content_level: contentLevel }
       : null,
+    task,
   };
 
   let response: Response;
@@ -201,6 +205,18 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
   const [viewerLoading, setViewerLoading] = useState(false);
   const [openSections,  setOpenSections]  = useState<Set<number>>(new Set());
   const [contentLevel,  setContentLevel]  = useState<"abstract" | "full">("full");
+
+  // Task modes (prompts/tasks/*). "" = no mode → no task prompt injected.
+  const [task,      setTask]      = useState<string>("");
+  const [taskList,  setTaskList]  = useState<{ id: string; label: string }[]>([]);
+
+  // Fetch available task-mode prompts once on mount.
+  useEffect(() => {
+    fetch(`${BASE_URL}/api/chat/tasks`)
+      .then((r) => r.json())
+      .then((d) => setTaskList(d.tasks ?? []))
+      .catch(() => setTaskList([]));
+  }, []);
 
   // Reset accordion when paper changes
   useEffect(() => { setOpenSections(new Set()); }, [selectedPaper?.arxiv_id]);
@@ -278,6 +294,7 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
         ? { arxiv_id: selectedPaper.arxiv_id, relative_path: selectedPaper.relative_path ?? "" }
         : null,
       contentLevel,
+      task,
       // onChunk — append to streaming message
       (chunk) => {
         setMessages((prev) =>
@@ -337,6 +354,40 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
         <>
           <div className="flex-shrink-0">
             <ModelSelector config={config} onChange={setConfig} />
+          </div>
+
+          {/* Task-mode selector — "None" = no task prompt injected */}
+          <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border bg-bg2">
+            <span className="font-mono text-[9px] text-text-dim uppercase tracking-wide flex-shrink-0">Mode:</span>
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setTask("")}
+                title="No task prompt — answer normally"
+                className={[
+                  "px-2 py-0.5 rounded-sm font-mono text-[9px] border transition-colors",
+                  task === ""
+                    ? "border-accent text-accent bg-accent/10"
+                    : "border-border text-text-dim hover:border-border2 hover:text-text",
+                ].join(" ")}
+              >
+                None
+              </button>
+              {taskList.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTask(t.id)}
+                  title={`Inject the "${t.label}" task prompt`}
+                  className={[
+                    "px-2 py-0.5 rounded-sm font-mono text-[9px] border transition-colors",
+                    task === t.id
+                      ? "border-accent text-accent bg-accent/10"
+                      : "border-border text-text-dim hover:border-border2 hover:text-text",
+                  ].join(" ")}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Paper context badge + grounding level toggle */}

@@ -82,8 +82,13 @@ function Dropdown({ value, options, onSelect, accent = "accent", placeholder = "
       {/* Options list */}
       {open && options.length > 0 && (
         <div
-          className="absolute z-50 w-full mt-1 bg-bg2 border border-border2 rounded-sm overflow-hidden"
-          style={{ boxShadow: `0 4px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(${accent === "accent" ? "0,255,136" : "0,207,255"},0.08)` }}
+          className="absolute z-50 w-full mt-1 bg-bg2 border border-border2 rounded-sm overflow-y-auto"
+          style={{
+            maxHeight: "220px",
+            boxShadow: `0 4px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(${accent === "accent" ? "0,255,136" : "0,207,255"},0.08)`,
+            scrollbarWidth: "thin",
+            scrollbarColor: `${accent === "accent" ? "#00ff8855" : "#00cfff55"} transparent`,
+          }}
         >
           {options.map((opt) => (
             <button
@@ -115,11 +120,59 @@ function Dropdown({ value, options, onSelect, accent = "accent", placeholder = "
 export default function ModelSelector({ config, onChange }: ModelSelectorProps) {
   const { setConfig: setGlobalConfig } = useLLM();
   const [expanded,      setExpanded]      = useState(false);
+
+  // Always-fresh config ref — async callbacks use this to avoid stale closures
+  const configRef = useRef(config);
+  configRef.current = config;
   const [apiKey,        setApiKey]        = useState(config.apiKey ?? "");
   const [ollamaUrl,     setOllamaUrl]     = useState(config.ollamaUrl ?? "http://localhost:11434");
   const [ollamaModels,  setOllamaModels]  = useState<string[]>([]);
   const [ollamaLoading, setOllamaLoading] = useState(false);
   const [ollamaError,   setOllamaError]   = useState<string | null>(null);
+
+  // OpenRouter (free models only)
+  const [orKey,     setOrKey]     = useState(config.openRouterApiKey ?? "");
+  const [orModels,  setOrModels]  = useState<string[]>([]);
+  const [orLoading, setOrLoading] = useState(false);
+  const [orError,   setOrError]   = useState<string | null>(null);
+
+  // Fetch FREE OpenRouter models (pricing == 0). The /models endpoint is public.
+  useEffect(() => {
+    if (config.provider !== "openrouter") return;
+
+    setOrLoading(true);
+    setOrError(null);
+
+    fetch("https://openrouter.ai/api/v1/models", { signal: AbortSignal.timeout(8000) })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        const free: string[] = (data.data ?? [])
+          .filter((m: { id: string }) =>
+            // `:free` suffix is OpenRouter's canonical marker for free chat models
+            // (pricing field is unreliable for some providers like DeepSeek)
+            m.id.endsWith(":free")
+          )
+          .map((m: { id: string }) => m.id)
+          .sort();
+        setOrModels(free);
+        // Use configRef.current (not the stale closure `config`) so we don't
+        // accidentally overwrite fields like openRouterApiKey that may have
+        // been set while the fetch was in flight.
+        const latest = configRef.current;
+        if (free.length > 0 && !free.includes(latest.model)) {
+          onChange({ ...latest, model: free[0] });
+        }
+      })
+      .catch(() => {
+        setOrError("Could not load OpenRouter models — check your connection.");
+        setOrModels([]);
+      })
+      .finally(() => setOrLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.provider]);
 
   // Fetch installed Ollama models whenever provider = ollama or URL changes
   useEffect(() => {
@@ -139,8 +192,9 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
           (m: { name: string }) => m.name,
         );
         setOllamaModels(names);
-        if (names.length > 0 && !names.includes(config.model)) {
-          onChange({ ...config, model: names[0] });
+        const latest = configRef.current;
+        if (names.length > 0 && !names.includes(latest.model)) {
+          onChange({ ...latest, model: names[0] });
         }
       })
       .catch(() => {
@@ -152,14 +206,17 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
   }, [config.provider, ollamaUrl]);
 
   const setProvider = (provider: LLMProvider) => {
-    const model = provider === "claude" ? CLAUDE_MODELS[0] : (ollamaModels[0] ?? "");
+    const model =
+      provider === "claude"     ? CLAUDE_MODELS[0]
+      : provider === "ollama"   ? (ollamaModels[0] ?? "")
+      :                           (orModels[0] ?? "");
     const updated = { ...config, provider, model };
     onChange(updated);
     setGlobalConfig(updated);
   };
 
   const saveAndCollapse = () => {
-    const updated = { ...config, apiKey, ollamaUrl };
+    const updated = { ...config, apiKey, ollamaUrl, openRouterApiKey: orKey };
     onChange(updated);
     setGlobalConfig(updated);
     setExpanded(false);
@@ -200,14 +257,16 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
             "px-2 py-0.5 rounded-full font-mono text-[9px] border",
             config.provider === "claude"
               ? "border-accent/40  text-accent  bg-accent/8"
-              : "border-accent2/40 text-accent2 bg-accent2/8",
+              : config.provider === "ollama"
+              ? "border-accent2/40 text-accent2 bg-accent2/8"
+              : "border-accent3/40 text-accent3 bg-accent3/8",
           ].join(" ")}
         >
-          {config.provider === "claude" ? "Claude" : "Ollama"}
+          {config.provider === "claude" ? "Claude" : config.provider === "ollama" ? "Ollama" : "OpenRouter"}
         </span>
 
         <span className="font-mono text-[10px] text-text-mid truncate max-w-[120px]">
-          {config.model || (ollamaLoading ? "loading…" : "—")}
+          {config.model || (ollamaLoading || orLoading ? "loading…" : "—")}
         </span>
 
         {/* Status dot — reflects actual connection state */}
@@ -220,6 +279,28 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
                 title={ready ? "API key configured" : "API key not set"}
                 style={
                   ready
+                    ? { background: "#00ff88", boxShadow: "0 0 4px #00ff88" }
+                    : { background: "#555", boxShadow: "none" }
+                }
+              />
+            );
+          } else if (config.provider === "openrouter") {
+            const hasKey = !!config.openRouterApiKey;
+            if (orLoading) {
+              return (
+                <span
+                  className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0 animate-pulse"
+                  title="Loading free models…"
+                  style={{ background: "#f5a623", boxShadow: "0 0 4px #f5a623" }}
+                />
+              );
+            }
+            return (
+              <span
+                className="ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0"
+                title={hasKey ? "API key configured" : "API key not set"}
+                style={
+                  hasKey
                     ? { background: "#00ff88", boxShadow: "0 0 4px #00ff88" }
                     : { background: "#555", boxShadow: "none" }
                 }
@@ -264,19 +345,19 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
           {/* Provider toggle */}
           <div>
             <p className="font-mono text-[9px] text-text-dim tracking-widest mb-1.5 uppercase">Provider</p>
-            <div className="flex gap-2">
-              {(["claude", "ollama"] as LLMProvider[]).map((p) => (
+            <div className="flex gap-2 flex-wrap">
+              {(["claude", "ollama", "openrouter"] as LLMProvider[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => setProvider(p)}
                   className={[
-                    "px-3 py-1 rounded-sm font-mono text-[10px] border transition-all duration-100 capitalize",
+                    "px-3 py-1 rounded-sm font-mono text-[10px] border transition-all duration-100",
                     config.provider === p
                       ? "border-accent text-accent bg-accent/8"
                       : "border-border text-text-dim hover:border-border2 hover:text-text",
                   ].join(" ")}
                 >
-                  {p === "claude" ? "Claude" : "Ollama (local)"}
+                  {p === "claude" ? "Claude" : p === "ollama" ? "Ollama (local)" : "OpenRouter"}
                 </button>
               ))}
             </div>
@@ -387,6 +468,62 @@ export default function ModelSelector({ config, onChange }: ModelSelectorProps) 
               >
                 Save
               </button>
+            </>
+          )}
+
+          {/* ── OpenRouter section (free models only) ── */}
+          {config.provider === "openrouter" && (
+            <>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="font-mono text-[9px] text-text-dim tracking-widest uppercase">
+                    Free Models
+                  </p>
+                  {orLoading && (
+                    <span className="font-mono text-[9px] text-accent3 animate-pulse">loading…</span>
+                  )}
+                  {!orLoading && !orError && orModels.length > 0 && (
+                    <span className="font-mono text-[9px] text-text-dim">{orModels.length} free</span>
+                  )}
+                </div>
+
+                {orError && (
+                  <div className="bg-neg/10 border border-neg/30 rounded-sm px-3 py-2 mb-1.5">
+                    <p className="font-mono text-[10px] text-neg">{orError}</p>
+                  </div>
+                )}
+
+                {orModels.length > 0 && (
+                  <Dropdown
+                    value={config.model}
+                    options={orModels}
+                    onSelect={(m) => onChange({ ...config, model: m })}
+                    accent="accent2"
+                  />
+                )}
+              </div>
+
+              <div>
+                <p className="font-mono text-[9px] text-text-dim tracking-widest mb-1.5 uppercase">API Key</p>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={orKey}
+                    onChange={(e) => setOrKey(e.target.value)}
+                    placeholder="sk-or-v1-••••••••"
+                    className="flex-1 bg-bg3 border border-border rounded-sm px-3 py-1.5 font-mono text-[11px] text-text placeholder:text-text-dim outline-none focus:border-accent3"
+                  />
+                  <button
+                    onClick={saveAndCollapse}
+                    className="px-3 py-1.5 border border-accent3 text-accent3 font-mono text-[10px] rounded-sm hover:bg-accent3/10 transition-colors"
+                  >
+                    Save
+                  </button>
+                </div>
+                <p className="font-mono text-[9px] text-text-dim mt-1">
+                  Get a key at openrouter.ai/keys — only $0 models are listed.
+                </p>
+              </div>
             </>
           )}
         </div>

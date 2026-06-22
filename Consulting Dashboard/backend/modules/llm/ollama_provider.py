@@ -5,9 +5,19 @@ from .base import LLMProvider
 
 
 class OllamaProvider(LLMProvider):
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "gemma3:27b"):
-        self.base_url = base_url.rstrip("/")
-        self.model    = model
+    # Low temperature by default: this is a precision research assistant
+    # (paper analysis, classification, code) — not creative writing. High temp
+    # makes borderline judgements (e.g. paper-type classification) flip between
+    # runs. Override per task if more variability is ever wanted.
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "gemma3:27b",
+        temperature: float = 0.3,
+    ):
+        self.base_url    = base_url.rstrip("/")
+        self.model       = model
+        self.temperature = temperature
 
     async def stream(
         self,
@@ -45,7 +55,7 @@ class OllamaProvider(LLMProvider):
                     "model":    self.model,
                     "messages": all_messages,
                     "stream":   True,
-                    "options":  {"num_ctx": num_ctx},
+                    "options":  {"num_ctx": num_ctx, "temperature": self.temperature},
                 },
             ) as response:
                 response.raise_for_status()

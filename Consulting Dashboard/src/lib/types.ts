@@ -32,13 +32,14 @@ export interface SearchFilters {
 }
 
 // ── LLM ───────────────────────────────────────────────────────────────
-export type LLMProvider = "claude" | "ollama";
+export type LLMProvider = "claude" | "ollama" | "openrouter";
 
 export interface LLMConfig {
   provider: LLMProvider;
   model: string;
-  apiKey?: string;         // Claude only
-  ollamaUrl?: string;      // Ollama only, default localhost:11434
+  apiKey?: string;            // Claude only
+  ollamaUrl?: string;         // Ollama only, default localhost:11434
+  openRouterApiKey?: string;  // OpenRouter only
 }
 
 export interface ChatMessage {

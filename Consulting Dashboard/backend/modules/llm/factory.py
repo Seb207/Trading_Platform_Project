@@ -2,6 +2,7 @@
 from .base import LLMProvider
 from .claude_provider import ClaudeProvider
 from .ollama_provider import OllamaProvider
+from .openrouter_provider import OpenRouterProvider
 
 
 def get_provider(
@@ -18,4 +19,11 @@ def get_provider(
     if provider == "ollama":
         return OllamaProvider(base_url=ollama_url, model=model)
 
-    raise ValueError(f"Unknown provider: {provider!r}. Supported: claude, ollama")
+    if provider == "openrouter":
+        if not api_key:
+            raise ValueError("OpenRouter API key is required.")
+        return OpenRouterProvider(api_key=api_key, model=model)
+
+    raise ValueError(
+        f"Unknown provider: {provider!r}. Supported: claude, ollama, openrouter"
+    )

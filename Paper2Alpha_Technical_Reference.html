@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #000;
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 0 40px;
+  }
+  h1 { font-size: 20pt; font-weight: bold; margin-top: 24pt; margin-bottom: 6pt; }
+  h2 { font-size: 14pt; font-weight: bold; margin-top: 18pt; margin-bottom: 4pt; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  h3 { font-size: 12pt; font-weight: bold; margin-top: 12pt; margin-bottom: 2pt; }
+  p  { margin: 6pt 0; }
+  ul, ol { margin: 4pt 0 4pt 20pt; padding: 0; }
+  li { margin: 2pt 0; }
+  code {
+    font-family: "Courier New", monospace;
+    font-size: 9.5pt;
+    background: #f4f4f4;
+    padding: 1px 4px;
+    border-radius: 2px;
+  }
+  pre {
+    font-family: "Courier New", monospace;
+    font-size: 9pt;
+    background: #f4f4f4;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 10px 14px;
+    margin: 8pt 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8pt 0;
+    font-size: 10pt;
+  }
+  th {
+    background: #e8eaed;
+    font-weight: bold;
+    border: 1px solid #aaa;
+    padding: 5px 8px;
+    text-align: left;
+  }
+  td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+    vertical-align: top;
+  }
+  .label-red    { color: #c62828; font-weight: bold; }
+  .label-green  { color: #1b5e20; font-weight: bold; }
+  .label-orange { color: #e65100; font-weight: bold; }
+  .subtitle {
+    font-size: 11pt;
+    color: #555;
+    margin-top: -10pt;
+    margin-bottom: 16pt;
+  }
+  hr { border: none; border-top: 1px solid #ccc; margin: 20pt 0; }
+  .section-note {
+    background: #fff8e1;
+    border-left: 3px solid #f9a825;
+    padding: 6px 10px;
+    margin: 8pt 0;
+    font-size: 10pt;
+  }
+</style>
+</head>
+<body>
+
+<h1>Paper2Alpha — Technical Reference Sheet</h1>
+<p class="subtitle">Code-grounded summary for interview preparation &nbsp;|&nbsp; Generated 2026-06-18</p>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>1. Goal</h2>
+
+<p>A <strong>quant research workbench</strong> that operates in two modes:</p>
+<ul>
+  <li><strong>Claude desktop (MCP mode):</strong> Claude calls 10 exposed tools autonomously to search arXiv, download papers, build semantic indexes, and analyze paper content — functioning as a research agent.</li>
+  <li><strong>Web dashboard (browser mode):</strong> A Next.js + FastAPI web app where a researcher browses a local paper library, downloads papers, selects one, and asks questions in an LLM chat panel with a structured analysis prompt.</li>
+</ul>
+<div class="section-note">There is <strong>no automated paper→alpha pipeline</strong> yet. No code automatically extracts trading signals from papers or calls the quant model from the dashboard.</div>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>2. Architecture / Data Flow</h2>
+
+<h3>End-to-end pipeline</h3>
+<pre>
+[arXiv API] → download_paper() → {arxiv_id}.md  (or .pdf)
+                                       ↓
+                                 metadata.json
+                                       ↓
+                      ChromaDB (BAAI/bge-base-en-v1.5)
+                        ├── "arxiv_papers"   (abstract-level)
+                        └── "paper_sections" (section-level)
+                                       ↓
+              FastAPI backend → /api/papers/* + /api/chat endpoints
+                                       ↓
+             Next.js UI: paper table · search · download panel
+                                       ↓
+      User selects paper → full text injected into LLM system prompt
+                                       ↓
+        LLM (Claude / Ollama / OpenRouter) → streamed SSE response
+</pre>
+
+<h3>Deterministic vs. LLM components</h3>
+<table>
+  <tr><th>Component</th><th>Type</th></tr>
+  <tr><td><code>arxiv_client.py</code> — search, download, parse sections</td><td>Deterministic Python</td></tr>
+  <tr><td>ChromaDB — <code>build_search_index</code>, <code>build_section_index</code>, <code>search_*</code></td><td>Deterministic (embedding + cosine similarity)</td></tr>
+  <tr><td><code>_build_system()</code> in <code>chat.py</code> — assembles system prompt</td><td>Deterministic</td></tr>
+  <tr><td><code>prompt_loader.py</code> — injects <code>prompts/*.md</code> and task prompts</td><td>Deterministic</td></tr>
+  <tr><td>LLM response (Claude / Ollama / OpenRouter)</td><td>Generative LLM</td></tr>
+</table>
+
+<h3>LLM agent role — MCP mode (agentic)</h3>
+<p><code>Research_LLM/mcp_server.py</code> is built on FastMCP. Claude desktop calls the tools in an autonomous loop: search arXiv → download → build index → read/analyze paper → generate output. This is genuine agentic behavior with real tool use.</p>
+
+<h3>LLM agent role — chat panel (non-agentic)</h3>
+<p>The dashboard chat is <strong>not agentic</strong>. It is a pure text generator. The selected paper is injected into the system prompt; the LLM generates a response but calls no tools and makes no decisions.</p>
+
+<h3>MCP tools exposed (<code>mcp_server.py</code>)</h3>
+<table>
+  <tr><th>Tool</th><th>What it does</th></tr>
+  <tr><td><code>search_arxiv_papers</code></td><td>Queries arXiv API (keyword + category + date range)</td></tr>
+  <tr><td><code>download_arxiv_paper</code></td><td>Downloads HTML→MD (or PDF fallback), saves metadata</td></tr>
+  <tr><td><code>list_local_papers</code></td><td>Lists <code>.md</code>/<code>.pdf</code> files under <code>papers/arXiv/</code></td></tr>
+  <tr><td><code>read_local_paper</code></td><td>Reads file content with pagination support</td></tr>
+  <tr><td><code>analyze_local_paper</code></td><td>Returns full content + parsed section map</td></tr>
+  <tr><td><code>bulk_download_papers</code></td><td>Batch download + backfill metadata in one pass</td></tr>
+  <tr><td><code>backfill_metadata</code></td><td>Batch-fetches metadata from arXiv API (50 IDs/call, rate-limited)</td></tr>
+  <tr><td><code>build_search_index</code></td><td>Embeds abstracts → ChromaDB <code>arxiv_papers</code> collection</td></tr>
+  <tr><td><code>build_section_index</code></td><td>Embeds sections → ChromaDB <code>paper_sections</code> collection</td></tr>
+  <tr><td><code>search_local_papers_by_topic</code></td><td>Semantic abstract search (returns similarity score 0–1)</td></tr>
+  <tr><td><code>search_sections_by_topic</code></td><td>Semantic section search with category / arxiv_id / section filters</td></tr>
+</table>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>3. Data &amp; Features — What Is Actually Implemented</h2>
+
+<h3>Confirmed real and fully functional</h3>
+<ul>
+  <li>arXiv paper search, download (HTML→Markdown via <code>markdownify</code>, PDF via <code>pypdf</code>), local storage by category</li>
+  <li>Metadata persistence (<code>metadata.json</code>), batched arXiv API calls with rate limiting and exponential-backoff retry</li>
+  <li>Abstract-level and section-level semantic search via ChromaDB (<code>BAAI/bge-base-en-v1.5</code>)</li>
+  <li>SSE-streaming download + auto-index pipeline (metadata → abstract embedding → section embedding)</li>
+  <li>LLM chat with multi-provider support (Claude, Ollama, OpenRouter free models), <code>temperature=0.3</code> default</li>
+  <li>Task-mode structured prompt injection (<code>paper_analysis.md</code>): Branch A (alpha/strategy) vs Branch B (general), with enforced section output format</li>
+  <li>Path traversal protection on all local file reads</li>
+</ul>
+
+<h3>Resume claims — verification</h3>
+<table>
+  <tr><th>Resume claim</th><th>Code status</th></tr>
+  <tr>
+    <td>Volatility, credit spread, momentum signals</td>
+    <td class="label-red">NOT in any file.</td>
+  </tr>
+  <tr>
+    <td>VWAP / EMA signals</td>
+    <td class="label-red">NOT in any file.</td>
+  </tr>
+  <tr>
+    <td>Filtered by a "variable selection network model"</td>
+    <td class="label-orange">Partially present, disconnected.</td>
+  </tr>
+  <tr>
+    <td>Proprietary model outputs</td>
+    <td class="label-red">Architecture defined, no trained weights, never called from any endpoint.</td>
+  </tr>
+</table>
+
+<p><strong>Note on "variable selection network model":</strong> <code>IrrationalityIndex</code> (<code>Index_Model.py</code>) includes a <code>factor_weights = Dense(input_dim, activation='sigmoid')</code> layer that element-wise gates normalized inputs — a rudimentary feature-weighting mechanism. This is <em>not</em> the same VSN-LSTM from the GTSF project; it is a separate Keras/TensorFlow transformer with no trained weights and no integration with the dashboard.</p>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>4. Models / Major Components</h2>
+
+<h3>IrrationalityIndex (<code>Quant Models/Irrationality_Index/Index_Model.py</code>)</h3>
+<p>A Keras/TensorFlow transformer model producing a 0–100 score per time step.</p>
+<ul>
+  <li><strong><code>TransformerEncoderBlock</code>:</strong> Multi-head attention + LayerNorm + 2-layer FFN + Dropout (rate 0.1). Stacked N times.</li>
+  <li><strong><code>PositionalEmbedding</code>:</strong> Sinusoidal encoding added to projected input.</li>
+  <li><strong><code>factor_weights</code>:</strong> <code>Dense(input_dim, activation='sigmoid')</code> — weights input features before projection.</li>
+  <li><strong><code>PredictionHead</code>:</strong> Dense(d_model/2, relu) → Dense(output_dim, linear), output ×100.</li>
+  <li><strong><code>Index_Model</code>:</strong> <code>create_sequences</code>, <code>prepare_data</code> (80/10/10 train/val/test split), <code>train_model</code> with EarlyStopping + ReduceLROnPlateau + ModelCheckpoint.</li>
+  <li><strong><code>ModelManager</code>:</strong> <code>save_weights</code> / <code>load_weights</code> / <code>save_model</code> / <code>load_full_model</code>.</li>
+  <li class="label-red"><strong>Status: Architecture only.</strong> No trained weights file exists in the repository. Never called from any running code path.</li>
+</ul>
+
+<h3>Factor_Management (<code>Quant Models/Irrationality_Index/Factor_Management.py</code>)</h3>
+<ul>
+  <li>Opens/closes Refinitiv (LSEG) API session via <code>refinitiv.data</code></li>
+  <li>Loads OHLC price (<code>TR.CLOSE</code> / <code>TRDPRC_1</code>), volume (<code>TR.Volume</code> / <code>ACVOL_UNS</code>), fixed income mid price/yield</li>
+  <li>Loads macro data (CPI, rates, etc.) from FRED via <code>pandas_datareader</code></li>
+  <li class="label-orange"><strong>Status: Data loader only.</strong> No signal construction on top of raw data.</li>
+</ul>
+
+<h3>ArxivToolClient (<code>Research_LLM/arxiv_client.py</code>)</h3>
+<p>~1,079 lines. All 10 tool methods fully implemented. Rate limiting (3 s min interval), exponential-backoff retry on 429/503, path traversal protection, PDF text extraction via <code>pypdf</code>.</p>
+
+<h3>LLM Providers (<code>Consulting Dashboard/backend/modules/llm/</code>)</h3>
+<p>Three providers — <code>ClaudeProvider</code>, <code>OllamaProvider</code>, <code>OpenRouterProvider</code> — all streaming via SSE with <code>temperature=0.3</code> default. Factory pattern in <code>factory.py</code>.</p>
+
+<h3>Dashboard Frontend Pages</h3>
+<table>
+  <tr><th>Page</th><th>Status</th></tr>
+  <tr><td><code>research/page.tsx</code></td><td class="label-green">Fully implemented</td></tr>
+  <tr><td><code>factor/page.tsx</code></td><td class="label-red">"Factor Scoring — Coming Soon" (placeholder only)</td></tr>
+  <tr><td><code>regime/page.tsx</code></td><td class="label-red">"PCA + Clustering — Coming Soon" (placeholder only)</td></tr>
+  <tr><td><code>portfolio/page.tsx</code></td><td class="label-red">"P&amp;L Tracking — Coming Soon" (placeholder only)</td></tr>
+</table>
+
+<p><strong>Trading Analysis DL/:</strong> Contains only empty <code>__init__.py</code> files. Zero implementation.</p>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>5. Validation / Testing</h2>
+
+<h3>Present</h3>
+<ul>
+  <li><strong><code>Research_LLM/tests/test_local_paper_tools.py</code>:</strong> 23 <code>unittest</code> cases. Covers <code>list_local_papers</code>, <code>read_local_paper</code>, <code>analyze_local_paper</code>, <code>_normalize_date</code>, all metadata CRUD helpers, <code>bulk_download_papers</code>, <code>backfill_metadata</code>, <code>build_search_index</code>, <code>search_local_papers_by_topic</code>. Uses <code>tempfile.TemporaryDirectory</code> + <code>unittest.mock</code> for ChromaDB. Real, runnable tests.</li>
+  <li><strong><code>backend/scripts/test_paper_analysis_prompt.py</code>:</strong> Manual integration test — constructs the system prompt and streams from Ollama to verify the paper analysis task mode works end-to-end.</li>
+</ul>
+
+<h3>Absent</h3>
+<ul>
+  <li>No tests for the <code>IrrationalityIndex</code> model or <code>Factor_Management</code></li>
+  <li>No tests for FastAPI endpoints or the Next.js frontend</li>
+  <li>No end-to-end pipeline tests</li>
+  <li><code>Index_Evaluation.py</code> is a 1-line empty file</li>
+</ul>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>6. Quantifiable Results</h2>
+
+<p class="label-red">None. No metrics, latency measurements, or improvement numbers are computed or logged anywhere in the codebase. No benchmark output files exist.</p>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>7. Honest Caveats</h2>
+
+<h3>(a) Resume claims the code does not currently support</h3>
+<ul>
+  <li><strong>"Automated research pipeline":</strong> Every stage requires manual user action (select paper, ask question). There is no scheduler, trigger, or autonomous loop that goes paper→signal without human input.</li>
+  <li><strong>"Integrating model outputs":</strong> The <code>IrrationalityIndex</code> model has no trained weights and is never called from any running code path. There are no model outputs to integrate.</li>
+  <li><strong>"Volatility, credit spread, momentum, VWAP/EMA, signals filtered by VSN":</strong> None of these are computed in any file. <code>Factor_Management.py</code> loads raw data from Refinitiv; no signal construction sits on top of it. The resume appears to describe the intended design of the <code>Irrationality_Index</code> submodule, not the current state of the code.</li>
+</ul>
+
+<h3>(b) Stubbed / incomplete</h3>
+<ul>
+  <li><code>Data_Analysis.py</code>: 7-line comment listing planned tools (Sharpe, rolling return, MDD, Bayesian), no implementation</li>
+  <li><code>Data_Reformation.py</code>, <code>Data_Management.py</code>, <code>Index_Evaluation.py</code>: 1-line empty files</li>
+  <li><code>Trading Analysis DL/</code>: Only <code>__init__.py</code> stubs — zero implementation</li>
+  <li>Factor, Regime, Portfolio dashboard pages: "Coming Soon" UI only</li>
+  <li><code>IrrationalityIndex</code>: Architecture defined, no trained model, no inference endpoint, not connected to dashboard</li>
+</ul>
+
+<h3>(c) Could not verify from available files</h3>
+<ul>
+  <li>Whether any trained weights for <code>IrrationalityIndex</code> exist outside this repository (e.g., on Google Colab, based on the "Created using Colab" commit message)</li>
+  <li>Whether <code>Factor_Management.py</code> is actively connected to a live Refinitiv session anywhere — no calling script was found in the repo</li>
+</ul>
+
+<hr>
+
+<h2>Summary</h2>
+<p><strong>Genuinely strong and defensible:</strong> The MCP server (<code>mcp_server.py</code> + <code>arxiv_client.py</code>, ~1,100 lines, fully functional, 23 unit tests), the two-level ChromaDB semantic search pipeline (abstract + section), and the LLM chat system with structured task-mode prompts.</p>
+<p><strong>Real but untrained:</strong> The <code>IrrationalityIndex</code> transformer architecture (Keras/TensorFlow, sigmoid feature-weighting gate, multi-head attention).</p>
+<p><strong>Not yet implemented:</strong> Signal computation, alpha extraction, backtesting, regime detection, portfolio tracking.</p>
+
+</body>
+</html>

@@ -4,11 +4,17 @@ import { useLLM } from "@/context/LLMContext";
 
 export default function TopBar() {
   const { config } = useLLM();
-  const label = `${config.provider === "claude" ? "Claude" : "Ollama"}: ${config.model}`;
+  const providerLabel =
+    config.provider === "claude" ? "Claude"
+    : config.provider === "ollama" ? "Ollama"
+    : "OpenRouter";
+  const label = `${providerLabel}: ${config.model}`;
 
   const isReady =
     config.provider === "claude"
       ? !!config.apiKey && config.apiKey.startsWith("sk-ant-")
+      : config.provider === "openrouter"
+      ? !!config.openRouterApiKey
       : !!config.model; // Ollama: trust model is set
 
   return (

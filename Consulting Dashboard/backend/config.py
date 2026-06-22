@@ -19,6 +19,12 @@ DOWNLOAD_DIR      = Path(
     os.getenv("DOWNLOAD_DIR", str(RESEARCH_LLM_DIR / "papers" / "arXiv"))
 )
 
+# Folder holding user-authored system-prompt fragments (.md / .txt).
+# Anything dropped here is auto-injected into the chat system prompt.
+PROMPTS_DIR       = Path(
+    os.getenv("PROMPTS_DIR", str(_BACKEND_DIR / "prompts"))
+)
+
 # ── Server ─────────────────────────────────────────────────────────────
 BACKEND_HOST      = os.getenv("BACKEND_HOST", "0.0.0.0")
 BACKEND_PORT      = int(os.getenv("BACKEND_PORT", "8000"))
