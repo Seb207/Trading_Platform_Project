@@ -354,14 +354,57 @@ Collection quirks discovered while building (encoded in `sources/`):
 `breadth` (market breadth — needs full-universe price pulls, heavier job,
 deferred) and `fomc_tone` (FOMC statement LLM scoring — Phase 4).
 
-### Phase 1 — Similarity engine MVP (numeric only)
-- Correlation-matrix diagnostic → merge `|r| > 0.7` groups (+ PCA-loading
-  cross-check to justify the grouping with data, not intuition)
-- Rolling z-score (level + change) → vectorize → k-NN with temporal
-  exclusion → per-factor contribution decomposition
-- Smoke test: query known crisis dates (2008-09, 2020-03, 2022) and check
-  the analogs match intuition
-- **Deliverable: `find_analogs(date) → [(analog, similarity, per-factor contribution)]`**
+### Phase 1 — Similarity engine MVP (numeric only) ← **complete**
+
+**Design requirement (locked in): user-selectable factor subsets, and
+adding a factor later must stay a one-line change.** Both are satisfied by
+one rule enforced throughout `similarity_engine.py`: nothing is hardcoded —
+every call resolves its own factor subset (`factor_schema.resolve_keys`,
+supports selection by explicit factor keys, by theme, or defaults to every
+active factor) and recomputes z-scoring + correlation grouping fresh from
+that subset. A new `FactorSpec` in `factor_schema.py` is automatically
+selectable by key and by theme with no changes to the similarity engine.
+
+- [x] `factor_schema.resolve_keys(factors=None, themes=None)` — the single
+      resolution point for "which columns participate," validated (raises
+      on unknown keys/themes) and order-preserving
+- [x] Transform layer (`similarity_engine.TRANSFORM_FUNCS`): level / yoy
+      (52-week) / mom (4-week) / log_level / ma4, applied per
+      `FactorSpec.transforms` — a factor's declared transforms are what
+      becomes its vector dimension(s), not the raw level
+- [x] `expanding_zscore` — per-column z-score using only data up to and
+      including each row (no fixed-window refit needed as history grows)
+- [x] `correlated_groups` + `build_vector_frame` — connected-components
+      grouping on `|r| ≥ 0.7` computed fresh on every call for whatever
+      subset was selected (never a cached/global grouping)
+- [x] `find_analogs(as_of, factors=None, themes=None, k=5, ...)` — brute-force
+      k-NN with a ±26-week exclusion window around the query and a 26-week
+      minimum separation enforced between returned analogs (neighbor-overlap
+      hygiene from the risk table above), returning per-dimension
+      contribution shares (sums to 1) for the colormap
+- [x] Smoke test (`python3 similarity_engine.py`): queries 2008-09-15,
+      2020-03-15, 2022-06-15 using a long-history factor subset (excluding
+      option_oi/credit_ig/credit_hy/sofr_ois_2y, which only start
+      2021-2024). Runs clean, correlated groups merge as expected (CPI+PPI+PCE
+      YoY → one inflation dimension; the 9 co-moving rate/spread/credit/equity
+      levels → one dimension), and per-factor contributions are interpretable.
+- **Deliverable achieved: `find_analogs(date, factors=[...], themes=[...])
+  → {query_date, vector_dimensions, groups, analogs: [{date, distance,
+  contributions}]}`**, in `similarity_engine.py`
+
+**Known Phase 1 limitation (by design, not a bug — this is exactly what
+Phase 2 exists to fix):** factors are used at their observation date, not
+their publication date. The 2020-03-15 smoke-test query weighted
+`unemployment__mom` heavily even though the unemployment RATE hadn't yet
+reflected the COVID shock at that date (it lagged into the April/May
+release) — `FactorSpec.pub_lag_days` is captured in the schema for exactly
+this reason but not yet applied. Phase 2's walk-forward protocol must shift
+every factor by its `pub_lag_days` before any validation claim is made.
+
+**Still open before Phase 2:** PCA-loading cross-check (validate that the
+correlation-based groups line up with what PCA would find) — deferred,
+not blocking; the correlation-grouping approach was already the primary
+method, PCA was always meant as a secondary diagnostic.
 
 ### Phase 2 — Validation (where credibility is decided)
 - Forward 1/3/6/12-month S&P return distribution of top-k analogs vs. the

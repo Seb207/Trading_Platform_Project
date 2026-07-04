@@ -150,3 +150,57 @@ def active_factors() -> list[FactorSpec]:
 
 def pending_factors() -> list[FactorSpec]:
     return [f for f in FACTORS if not f.active]
+
+
+_SPEC_BY_KEY = {f.key: f for f in FACTORS}
+
+
+def get_spec(key: str) -> FactorSpec:
+    try:
+        return _SPEC_BY_KEY[key]
+    except KeyError:
+        raise ValueError(f"Unknown factor key: {key!r}") from None
+
+
+def resolve_keys(
+    factors: list[str] | None = None,
+    themes: list[str] | None = None,
+) -> list[str]:
+    """Resolve a factor/theme selection to a concrete list of active factor keys.
+
+    This is the single place the similarity engine (and anything else) goes
+    to turn a user's "just these factors" / "just this theme" request into
+    columns — so selecting a subset and adding a new factor both stay
+    one-line changes: a new FactorSpec is automatically selectable by key
+    and by its theme with no other code changes.
+
+    - factors=None, themes=None → every active factor (the default: use everything)
+    - factors=[...]             → exactly those keys (validated)
+    - themes=[...]              → every active factor in those themes
+    - both given                → union of the two
+    Raises ValueError on any unknown key or theme (fail loud, not silent).
+    """
+    active = active_factors()
+    order = [f.key for f in active]           # preserve FACTORS declaration order
+    valid_keys = set(order)
+    theme_map: dict[str, list[str]] = {}
+    for f in active:
+        theme_map.setdefault(f.theme, []).append(f.key)
+
+    if factors is None and themes is None:
+        return order
+
+    selected: set[str] = set()
+    if factors:
+        unknown = set(factors) - valid_keys
+        if unknown:
+            raise ValueError(f"Unknown or inactive factor keys: {sorted(unknown)}")
+        selected.update(factors)
+    if themes:
+        unknown_themes = set(themes) - set(theme_map)
+        if unknown_themes:
+            raise ValueError(f"Unknown themes: {sorted(unknown_themes)}")
+        for t in themes:
+            selected.update(theme_map[t])
+
+    return [k for k in order if k in selected]
