@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import CORS_ORIGINS, BACKEND_HOST, BACKEND_PORT
-from backend.routers import papers, status, chat
+from backend.routers import papers, status, chat, regime
 
 app = FastAPI(
     title="Quant Research Dashboard API",
@@ -27,6 +27,7 @@ app.add_middleware(
 app.include_router(papers.router)
 app.include_router(status.router)
 app.include_router(chat.router)
+app.include_router(regime.router)
 
 
 # ── Health check ───────────────────────────────────────────────────────

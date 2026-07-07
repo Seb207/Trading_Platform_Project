@@ -19,6 +19,10 @@ DOWNLOAD_DIR      = Path(
     os.getenv("DOWNLOAD_DIR", str(RESEARCH_LLM_DIR / "papers" / "arXiv"))
 )
 
+MARKET_REGIME_DIR = Path(
+    os.getenv("MARKET_REGIME_DIR", str(_PROJECT_DIR / "Market Regime"))
+)
+
 # Folder holding user-authored system-prompt fragments (.md / .txt).
 # Anything dropped here is auto-injected into the chat system prompt.
 PROMPTS_DIR       = Path(

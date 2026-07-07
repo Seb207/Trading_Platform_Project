@@ -72,3 +72,82 @@ export interface StatusResponse {
   abstract_index_built: boolean;
   section_index_built: boolean;
 }
+
+// ── Market Regime ────────────────────────────────────────────────────
+// Context-retrieval tool: find_analogs() is the core, always-on result;
+// validation (KS test / sensitivity sweep) is opt-in, never auto-called.
+
+export interface RegimeFactor {
+  key: string;
+  name: string;
+  theme: string;
+  start: string | null;
+  end: string | null;
+}
+
+export interface RegimeFactorsResponse {
+  factors: RegimeFactor[];
+  themes: string[];
+}
+
+export interface EventPoint {
+  offset_weeks: number;
+  return_pct: number | null;
+}
+
+export interface RegimeAnalog {
+  date: string;
+  distance: number;
+  contributions: Record<string, number>;
+  // Per merged dimension: each original factor's own share within that
+  // group (sums to 1 within the group). Informational only — not a
+  // decomposition of the group's `contributions` percentage above, since
+  // the group score is based on the averaged z-score, not summed per-member
+  // squared differences. Absent/empty for dimensions that aren't merged.
+  member_contributions: Record<string, Record<string, number>>;
+  event_series: EventPoint[];
+  forward_returns: Record<string, number | null>;
+}
+
+export interface RegimeAnalogsResponse {
+  query_date: string;
+  factors_used: string[];
+  vector_dimensions: string[];
+  groups: Record<string, string[]>;
+  analogs: RegimeAnalog[];
+  query_event_series: EventPoint[];
+}
+
+export interface RegimeValidationHorizonStats {
+  n_conditioned: number;
+  n_conditioned_unique?: number;
+  n_unconditional?: number;
+  conditioned_mean?: number;
+  conditioned_unique_mean?: number;
+  unconditional_mean?: number;
+  conditioned_std?: number;
+  unconditional_std?: number;
+  ks_statistic?: number;
+  ks_pvalue?: number;
+  significant_at_5pct?: boolean;
+  ks_statistic_unique?: number;
+  ks_pvalue_unique?: number;
+  significant_at_5pct_unique?: boolean;
+  note?: string;
+}
+
+export interface RegimeValidateResponse {
+  mode: "validate" | "sweep";
+  n_query_dates?: number;
+  k?: number;
+  query_interval_weeks?: number;
+  horizons?: Record<string, RegimeValidationHorizonStats>;
+  rows?: {
+    k: number;
+    exclude_weeks: number;
+    n_query_dates: number;
+    n_unique_analogs: number | null;
+    ks_pvalue_unique: number | null;
+    significant: boolean | null;
+  }[];
+}

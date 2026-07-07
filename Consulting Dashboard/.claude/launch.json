@@ -8,6 +8,12 @@
       "port": 3000
     },
     {
+      "name": "fastapi-backend",
+      "runtimeExecutable": "/Users/ahnsebin/Documents/Personal Project/Quant/Trading_Platform_Project/.venv/bin/python3",
+      "runtimeArgs": ["-m", "uvicorn", "backend.main:app", "--reload", "--port", "8000"],
+      "port": 8000
+    },
+    {
       "name": "mockup-server",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "/Users/ahnsebin/Documents/Personal Project/Quant/Trading_Platform_Project/Consulting Dashboard/mockups"],

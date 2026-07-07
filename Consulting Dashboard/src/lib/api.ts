@@ -7,6 +7,9 @@ import type {
   Paper,
   PaperSection,
   StatusResponse,
+  RegimeFactorsResponse,
+  RegimeAnalogsResponse,
+  RegimeValidateResponse,
 } from "@/lib/types";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -132,6 +135,60 @@ export async function searchArxiv(opts: {
       date_from:   opts.dateFrom ?? "",
       date_to:     opts.dateTo ?? "",
       category:    opts.category ?? "",
+    }),
+  });
+}
+
+// ── Market Regime ────────────────────────────────────────────────────
+// /analogs is the core, always-on retrieval call. /validate is opt-in —
+// only call it when the user explicitly asks to check robustness.
+
+export async function fetchRegimeFactors(): Promise<RegimeFactorsResponse> {
+  return apiFetch("/api/regime/factors");
+}
+
+export async function fetchRegimeAnalogs(opts: {
+  asOf: string;
+  factors?: string[] | null;
+  themes?: string[] | null;
+  k?: number;
+  excludeWeeks?: number;
+  minSeparationWeeks?: number;
+  corrThreshold?: number;
+}): Promise<RegimeAnalogsResponse> {
+  return apiFetch("/api/regime/analogs", {
+    method: "POST",
+    body: JSON.stringify({
+      as_of:                opts.asOf,
+      factors:               opts.factors ?? null,
+      themes:                opts.themes ?? null,
+      k:                     opts.k ?? 5,
+      exclude_weeks:         opts.excludeWeeks ?? 26,
+      min_separation_weeks:  opts.minSeparationWeeks ?? 26,
+      corr_threshold:        opts.corrThreshold ?? 0.7,
+    }),
+  });
+}
+
+export async function fetchRegimeValidation(opts: {
+  factors?: string[] | null;
+  themes?: string[] | null;
+  k?: number;
+  excludeWeeks?: number;
+  minSeparationWeeks?: number;
+  queryIntervalWeeks?: number;
+  mode?: "validate" | "sweep";
+}): Promise<RegimeValidateResponse> {
+  return apiFetch("/api/regime/validate", {
+    method: "POST",
+    body: JSON.stringify({
+      factors:               opts.factors ?? null,
+      themes:                opts.themes ?? null,
+      k:                     opts.k ?? 5,
+      exclude_weeks:         opts.excludeWeeks ?? 26,
+      min_separation_weeks:  opts.minSeparationWeeks ?? 26,
+      query_interval_weeks:  opts.queryIntervalWeeks ?? 4,
+      mode:                  opts.mode ?? "validate",
     }),
   });
 }

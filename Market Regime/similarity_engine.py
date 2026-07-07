@@ -24,6 +24,7 @@ Usage:
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -148,56 +149,80 @@ def build_vector_frame(
     return pd.DataFrame(vector_cols), membership
 
 
-# ── Main entry point ─────────────────────────────────────────────────────
+# ── Publication-lag adjustment (Phase 2 walk-forward requirement) ───────
 
-def find_analogs(
-    as_of: str,
+def build_pub_lag_adjusted(raw: pd.DataFrame) -> pd.DataFrame:
+    """Shift each factor by its FactorSpec.pub_lag_days (rounded up to whole
+    weeks) so a value only becomes visible when it would actually have been
+    published — not on its observation date.
+
+    Practical approximation: shifts the already weekly-aligned/LOCF'd column
+    forward by ceil(pub_lag_days / 7) weeks. Not applied by default in
+    find_analogs (see README's documented Phase 1 limitation); Phase 2
+    validation always applies it.
+    """
+    out = {}
+    for col in raw.columns:
+        try:
+            lag_weeks = math.ceil(get_spec(col).pub_lag_days / 7)
+        except ValueError:
+            lag_weeks = 0
+        out[col] = raw[col].shift(lag_weeks) if lag_weeks > 0 else raw[col]
+    return pd.DataFrame(out)
+
+
+# ── Reusable prepare/search split (what makes Phase 2 backtesting cheap) ─
+#
+# expanding_zscore is causal per row — a row's z-score depends only on data
+# up to and including that row, regardless of how many extra rows trail it
+# in the same call. So the z-score frame can be computed ONCE across all
+# history and safely reused for every query date in a walk-forward backtest;
+# only the correlation grouping (which looks at a WINDOW of rows) must be
+# recomputed after slicing to date <= as_of for each query, which
+# find_analogs_from_zscore does before anything else touches the data.
+
+def prepare_zscore_frame(
     factors: list[str] | None = None,
     themes: list[str] | None = None,
+    data_path: str | Path | None = None,
+    min_history_weeks: int = 52,
+    apply_pub_lag: bool = False,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Load + transform + expanding-z-score once. Returns (z_full, resolved_keys)."""
+    keys = resolve_keys(factors, themes)
+    raw = pd.read_parquet(data_path or DEFAULT_DATA_PATH)
+    if apply_pub_lag:
+        raw = build_pub_lag_adjusted(raw)
+
+    features = build_feature_frame(raw, keys)
+    z = expanding_zscore(features, min_periods=min_history_weeks).dropna(how="any")
+    return z, keys
+
+
+def find_analogs_from_zscore(
+    z_full: pd.DataFrame,
+    as_of: str | pd.Timestamp,
     k: int = 5,
     exclude_weeks: int = 26,
     min_separation_weeks: int = 26,
     corr_threshold: float = 0.7,
-    min_history_weeks: int = 52,
-    data_path: str | Path | None = None,
 ) -> dict:
-    """Find the k most similar historical weeks to `as_of`.
+    """Core analog search on an already-prepared z-score frame.
 
-    factors / themes select which columns participate (see
-    factor_schema.resolve_keys — both None means every active factor).
-    Everything downstream (z-scoring, correlation grouping, distances,
-    per-feature contributions) is recomputed fresh for that selection.
-
-    Returns a dict:
-        query_date        — the actual dataset date used (snapped to <= as_of)
-        factors_used       — resolved factor keys
-        vector_dimensions   — final vector columns after grouping
-        groups              — {merged_name: [original columns]} for any
-                              correlated groups that got combined
-        analogs             — [{date, distance, contributions}, ...],
-                              contributions are each dimension's share of
-                              the squared distance (sums to 1 per analog)
+    Walk-forward safe: slices to rows <= as_of BEFORE computing correlation
+    groups or the candidate pool, so nothing after the query date can ever
+    enter the result.
     """
-    keys = resolve_keys(factors, themes)
-    raw = pd.read_parquet(data_path or DEFAULT_DATA_PATH)
-
-    features = build_feature_frame(raw, keys)
-    z = expanding_zscore(features, min_periods=min_history_weeks).dropna(how="any")
-    if z.empty:
-        raise ValueError(
-            "No fully-covered history for this factor selection — "
-            "check for a very recently added factor with a short backfill."
-        )
-
     as_of_ts = pd.Timestamp(as_of)
-    available = z.index[z.index <= as_of_ts]
-    if len(available) == 0:
+    z = z_full[z_full.index <= as_of_ts]
+    if z.empty:
         raise ValueError(f"No data available at or before {as_of}")
-    query_date = available[-1]
+    query_date = z.index[-1]
 
     groups = correlated_groups(z, threshold=corr_threshold)
     vec, membership = build_vector_frame(z, groups)
     query_vec = vec.loc[query_date]
+    query_z = z.loc[query_date]   # pre-merge z-scores, for the member breakdown below
 
     excl_start = query_date - pd.Timedelta(weeks=exclude_weeks)
     excl_end = query_date + pd.Timedelta(weeks=exclude_weeks)
@@ -218,6 +243,8 @@ def find_analogs(
         if len(selected) >= k:
             break
 
+    merged_groups = {name: members for name, members in membership.items() if len(members) > 1}
+
     analogs = []
     for date in selected:
         total = dist_sq.loc[date]
@@ -225,19 +252,105 @@ def find_analogs(
             (diff_sq.loc[date] / total).sort_values(ascending=False).to_dict()
             if total > 0 else {}
         )
+
+        # Member breakdown for merged dimensions: each member's own pre-merge
+        # squared z-score difference, expressed as a share WITHIN that group.
+        # This is informational, not a decomposition of the group's own
+        # contribution above — the group's score is based on the AVERAGED
+        # z-score (build_vector_frame), which doesn't decompose linearly into
+        # its members' individual squared differences. It answers "which
+        # member moved the most," not "how much did each contribute to the
+        # group's official percentage."
+        analog_z = z.loc[date]
+        member_contributions: dict[str, dict[str, float]] = {}
+        for name, members in merged_groups.items():
+            member_diff_sq = {m: float((query_z[m] - analog_z[m]) ** 2) for m in members}
+            member_total = sum(member_diff_sq.values())
+            member_contributions[name] = (
+                {m: v / member_total for m, v in member_diff_sq.items()}
+                if member_total > 0 else {m: 1.0 / len(members) for m in members}
+            )
+
         analogs.append({
             "date": date.date().isoformat(),
             "distance": float(dist.loc[date]),
             "contributions": {c: float(v) for c, v in contributions.items()},
+            "member_contributions": member_contributions,
         })
 
     return {
         "query_date": query_date.date().isoformat(),
-        "factors_used": keys,
         "vector_dimensions": list(vec.columns),
-        "groups": {name: members for name, members in membership.items() if len(members) > 1},
+        "groups": merged_groups,
         "analogs": analogs,
     }
+
+
+# ── Main entry point ─────────────────────────────────────────────────────
+
+def find_analogs(
+    as_of: str,
+    factors: list[str] | None = None,
+    themes: list[str] | None = None,
+    k: int = 5,
+    exclude_weeks: int = 26,
+    min_separation_weeks: int = 26,
+    corr_threshold: float = 0.7,
+    min_history_weeks: int = 52,
+    data_path: str | Path | None = None,
+) -> dict:
+    """Find the k most similar historical weeks to `as_of`.
+
+    factors / themes select which columns participate (see
+    factor_schema.resolve_keys — both None means every active factor).
+    Everything downstream (z-scoring, correlation grouping, distances,
+    per-feature contributions) is recomputed fresh for that selection.
+
+    Does NOT apply publication-lag adjustment — see README's documented
+    Phase 1 limitation. Phase 2's validation (validation.py) always does.
+
+    Returns a dict:
+        query_date        — the actual dataset date used (snapped to <= as_of)
+        factors_used       — resolved factor keys
+        vector_dimensions   — final vector columns after grouping
+        groups              — {merged_name: [original columns]} for any
+                              correlated groups that got combined
+        analogs             — [{date, distance, contributions,
+                              member_contributions}, ...]. contributions are
+                              each vector dimension's share of the squared
+                              distance (sums to 1 per analog).
+                              member_contributions[merged_dim] breaks a
+                              merged dimension down into its original factors'
+                              individual shares (sums to 1 within that group;
+                              informational only, not a decomposition of the
+                              group's own contribution — see
+                              find_analogs_from_zscore's inline comment)
+    """
+    z_full, keys = prepare_zscore_frame(
+        factors, themes, data_path=data_path,
+        min_history_weeks=min_history_weeks, apply_pub_lag=False,
+    )
+    if z_full.empty:
+        raise ValueError(
+            "No fully-covered history for this factor selection — "
+            "check for a very recently added factor with a short backfill."
+        )
+    result = find_analogs_from_zscore(
+        z_full, as_of, k=k, exclude_weeks=exclude_weeks,
+        min_separation_weeks=min_separation_weeks, corr_threshold=corr_threshold,
+    )
+    result["factors_used"] = keys
+    return result
+
+
+def _deep_history_factors(before: str = "1996-01-01", data_path: str | Path | None = None) -> list[str]:
+    """Active factors whose data starts before `before` — derived from the
+    dataset itself, not a hardcoded name list, so it stays correct as
+    factors are added or their backfills deepen."""
+    from factor_schema import active_factors
+    raw = pd.read_parquet(data_path or DEFAULT_DATA_PATH)
+    cutoff = pd.Timestamp(before)
+    return [f.key for f in active_factors() if raw[f.key].dropna().index[0] <= cutoff]
 
 
 if __name__ == "__main__":
@@ -245,14 +358,13 @@ if __name__ == "__main__":
     #
     # NOTE: using every active factor (factors=None) would fail here on
     # purpose — dropna(how="any") requires ALL selected factors to have data,
-    # and option_oi/credit_ig/credit_hy/sofr_ois_2y only start in 2021-2024.
-    # Querying 2008 or 2020 against the full set finds zero fully-covered
-    # history. This is exactly the scenario "pick your own factors" solves:
-    # exclude the short-history factors to query further back in time.
-    from factor_schema import active_factors
-
-    SHORT_HISTORY = {"option_oi", "credit_ig", "credit_hy", "sofr_ois_2y"}
-    long_history_factors = [f.key for f in active_factors() if f.key not in SHORT_HISTORY]
+    # and several (option_oi, credit_ig/hy, sofr_ois_2y, dollar_index,
+    # put_call_ratio, fed_balance_sheet) only start 2002-2024. Querying 2008
+    # against the full set leaves too little pre-query history once the
+    # exclusion window + min_history_weeks are applied. This is exactly the
+    # scenario "pick your own factors" solves: use only factors with deep
+    # enough history for the date being queried.
+    long_history_factors = _deep_history_factors(before="1996-01-01")
 
     for date in ["2008-09-15", "2020-03-15", "2022-06-15"]:
         try:

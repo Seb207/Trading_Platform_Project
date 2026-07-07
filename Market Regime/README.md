@@ -7,7 +7,17 @@ liquidity, microstructure, sentiment, geopolitical, and policy factors against
 historical periods to find the closest historical analog(s), then visualize
 what happened after those analog periods.
 
-This is a design/planning document. No implementation exists yet.
+**Scope, stated plainly (locked 2026-07-02):** this is a *context-retrieval*
+tool, not a predictive/trading-signal tool. It surfaces historically similar
+periods and what followed them in one place; interpreting that context is
+entirely the user's judgment call, not something the tool asserts for them.
+Concretely, this means:
+- `find_analogs()` is the core deliverable — retrieval, not prediction.
+- Statistical validation (`validation.py`) is an **optional, on-demand
+  analysis capability** the user can invoke from the dashboard for any query
+  they've made (e.g., "how robust are these particular analogs, historically?")
+  — it is not a gate the pipeline must pass before being useful. See
+  §Phase 2 below for why this was reframed after Phase 2's first pass.
 
 ---
 
@@ -406,21 +416,108 @@ correlation-based groups line up with what PCA would find) — deferred,
 not blocking; the correlation-grouping approach was already the primary
 method, PCA was always meant as a secondary diagnostic.
 
-### Phase 2 — Validation (where credibility is decided)
-- Forward 1/3/6/12-month S&P return distribution of top-k analogs vs. the
-  unconditional distribution (KS test or similar)
-- Walk-forward protocol: the index only contains data prior to the query
-  date (no look-ahead)
-- Sensitivity analysis: theme weights, k, exclusion window
-- **Deliverable: a quantitative report on whether analog-conditioning carries
-  statistical content**
+### Phase 2 — Validation ← **complete, reframed as an optional dashboard feature**
 
-### Phase 3 — Dashboard integration
-- New `backend/routers/regime.py` (same pattern as papers/chat routers)
-- Implement `regime/page.tsx`: ① factor colormap + table ② event-time-aligned
-  time-series overlay ③ forward-outcome fan chart
-- **Deliverable: "top-5 most similar historical periods + what followed"
-  queryable from the dashboard**
+**Scope correction (2026-07-02):** Phase 2 was originally framed as "where
+credibility is decided" — a gate the tool must pass to be considered
+trustworthy. That framing doesn't fit the tool's actual stated purpose (see
+§Goal): this is a context-retrieval tool where interpretation is the user's
+call, not a black-box predictive signal that needs to prove itself before
+shipping. `validation.py`'s output is real and useful, but its role changes:
+it becomes **an on-demand analysis the user can run from the dashboard**
+against their own query/factor selection (e.g., "how robust are these 5
+analogs I just pulled, historically?") — not a precondition Phase 3 waits on.
+Everything below still stands as work done; only its role in the roadmap
+changed. See Phase 3 for how it surfaces in the dashboard.
+
+New file: `validation.py` — `run_validation()`, `sensitivity_sweep()`.
+
+- [x] **Walk-forward protocol.** `find_analogs_from_zscore` (used identically
+      in Phase 1 and here) slices to `date <= query` before computing
+      correlation groups or the candidate pool — nothing after the query
+      date can ever influence its own result. `build_pub_lag_adjusted`
+      shifts every factor by its `FactorSpec.pub_lag_days` (rounded to
+      weeks) so validation only sees what would actually have been public —
+      closing the Phase 1 limitation noted above.
+- [x] **Forward-return distribution test.** For each of 403 query dates
+      (sampled every 4 weeks, 1996–present, 19 deep-history factors),
+      pooled the top-5 analogs' forward 1/3/6/12-month SPY returns and
+      ran a two-sample KS test against the unconditional distribution.
+- [x] **Caught and corrected a pseudo-replication bug during this run**:
+      the naive pooled test showed significant results at 1m/3m
+      (p=0.003, p<0.0001) — but adjacent query dates (4 weeks apart) mostly
+      re-select the same analogs, so the same historical return was counted
+      many times, inflating the effective sample size and violating the KS
+      test's i.i.d. assumption. Deduplicating to unique analog dates
+      (689 of 1,929 pooled observations were unique) made every horizon
+      non-significant (p = 0.39–0.97). The corrected/unique numbers are the
+      ones that matter; the pooled ones are reported alongside only to show
+      the artifact explicitly.
+- [x] **Sensitivity sweep**: k ∈ {3,5,10,15} × exclusion window ∈ {13,26,52}
+      weeks, 12 configurations, 3-month horizon, unique-date KS test.
+      **0/12 significant.** The null result is not an artifact of one
+      parameter choice.
+
+**What the run found (this run's data point, not a gate result):** with the
+tested design (19 numeric macro/rates/vol/credit factors, equal-weighted
+z-scored level+trend, Euclidean k-NN), analog-conditioned forward S&P
+returns were **not statistically distinguishable** from the unconditional
+distribution at any tested horizon (1/3/6/12 months) or configuration in
+this run. Meanwhile the Phase 1 smoke-test analogs were qualitatively
+sensible (2008-09 → 2008-02, 2001-08, 1998-12; 2020-03 → 2008-10, 1998-09) —
+consistent with the tool's actual job (surfacing macro-similar context, not
+asserting a return forecast). This is exactly the kind of check the
+dashboard feature below exists to let a user re-run against their own
+factor selection, not a verdict on the tool as a whole.
+
+Untested levers if a user wants to probe further from the dashboard: theme/
+factor *weighting* (still equal-weight — never revisited, unlike k/window
+which were swept), a narrower factor subset instead of all 19 combined, or
+a different distance metric.
+
+### Phase 3 — Dashboard integration ← **complete**
+
+- [x] `Consulting Dashboard/backend/modules/regime/regime_bridge.py` — bridges
+      to `Market Regime/{factor_schema,similarity_engine,validation}.py` (same
+      pattern as `arxiv_bridge.py` for Research_LLM), lazy-imported so numpy/
+      pandas/scipy only load once a regime endpoint is actually hit
+- [x] `backend/routers/regime.py`:
+      - `GET /api/regime/factors` — every active factor + its real data
+        coverage, for the UI's theme picker
+      - `POST /api/regime/analogs` — wraps `find_analogs()`, the core
+        always-on retrieval call, enriched with event-time-aligned SPY paths
+        and forward returns (computed here, not in `similarity_engine.py` —
+        keeps that module a clean research library, not dashboard-specific)
+      - `POST /api/regime/validate` — wraps `run_validation()` /
+        `sensitivity_sweep()`, **only ever invoked when the frontend's
+        opt-in button is clicked** — never on page load, never automatically
+        after an analogs query
+- [x] `src/app/regime/page.tsx` + `src/components/regime/`:
+      `FactorPicker` (theme multi-select, defaults to "all factors"),
+      `AnalogColormap` (① factor-contribution heatmap + table, merged
+      correlation groups labeled), `EventTimeOverlay` (② event-time-aligned
+      SPY return lines, recharts), `ForwardReturnFanChart` (③ grouped bars of
+      each analog's actual forward return per horizon), `ValidationPanel`
+      (④ the opt-in KS-test / sensitivity-sweep panel — closed by default,
+      shows the *_unique numbers with an explicit note to trust those over
+      the pooled ones)
+- [x] End-to-end verified live in the browser (2026-07-06): queried
+      2020-03-15 against inflation+rates factors → 5 analogs incl. 2007-11-09
+      and 1998-10-02; event-time overlay correctly showed the COVID-crash dip
+      before the query date; forward-return chart correctly showed 2007-11-09
+      cratering ~-35% at the 12-month mark (the GFC); opt-in validation panel
+      correctly reproduced Phase 2's null result (547 query dates, all 4
+      horizons non-significant) live from the dashboard
+- Two real bugs caught and fixed during verification: (1) `rd.get_history`-style
+  `ResponsiveContainer` sizing race — recharts briefly lays out at 0px before
+  its `ResizeObserver` corrects it, resolved by re-checking after layout
+  settles, not a data problem; (2) confirmed the dashboard's stale, non-reload
+  backend/frontend dev processes from an earlier session had to be killed and
+  restarted through the preview tool for the new router/pages to load
+- **Deliverable achieved: "top-5 most similar historical periods + what
+  followed" queryable from the dashboard, with statistical validation
+  available as a secondary, user-triggered lens — not a blocking gate on the
+  primary result**
 
 ### Phase 4 — Text / narrative axis (can start in parallel after Phase 1)
 - FOMC statements 1994–present: backfill + LLM hawkish/dovish scoring
@@ -435,3 +532,243 @@ method, PCA was always meant as a secondary diagnostic.
 - Scheduled auto-refresh of all data sources
 
 Dependency chain: 0 → 1 → 2 → 3 serial; Phase 4 parallelizable after Phase 1.
+
+---
+
+## 7. Dashboard Output Reference — How Each Result Is Computed
+
+Every number and chart the dashboard shows traces back to one function. This
+section documents that trace for each output, so nothing on screen is a
+black box.
+
+### 7.0 Similarity ranking bars
+
+**What it shows:** the k analogs as a simple ranked list — closest match
+first — each with a horizontal bar sized by relative similarity, so the
+ranking that's implicit in the colormap's column order is visible on its
+own before diving into *why* each one ranked where it did.
+
+**Computed by:** nothing new — `find_analogs_from_zscore` already returns
+`analogs` pre-sorted ascending by distance (candidates are consumed in
+that order when applying the minimum-separation filter), so
+`SimilarityRanking.tsx` only needs to render that order. Bar length is
+`100 * (1 - distance / max_distance_in_this_result_set)` — a **relative**
+scale within the k results just returned, not an absolute similarity score
+or probability (there's no fixed 0–100 scale to calibrate against; a
+"70%" bar in one query and a "70%" bar in a totally different query aren't
+comparable to each other).
+
+### 7.1 Factor contribution colormap + table
+
+**What it shows:** for each of the k analogs, which vector dimensions drove
+its similarity to the query, and whether any original factors were merged.
+
+**Computed by:** `similarity_engine.find_analogs()` →
+`find_analogs_from_zscore()`, rendered by `AnalogColormap.tsx`.
+
+1. The selected factors (or all active ones) are resolved to columns
+   (`factor_schema.resolve_keys`), transformed per `FactorSpec.transforms`
+   (level/yoy/mom/log_level/ma4 — see §7.5), and expanding-z-scored
+   (`expanding_zscore`) using only data up to and including each row.
+2. `correlated_groups()` computes the pairwise correlation matrix of the
+   z-scored columns **for this specific factor selection, freshly every
+   call** and connects any pair with `|r| ≥ 0.7` (the locked design decision
+   in §5) into one group.
+3. `build_vector_frame()` collapses each group into a single column (the
+   mean of its members' z-scores) — this is the `(merged)` label the UI
+   shows, with the full member list in the row's tooltip. Singleton
+   (unmerged) factors pass through unchanged.
+4. For the query vector `q` and each candidate vector `c`, the per-dimension
+   squared difference `(q_i - c_i)²` is computed. Each analog's table
+   column is that dimension's share of the analog's *total* squared
+   distance — i.e. `contribution_i = (q_i - c_i)² / Σ_j (q_j - c_j)²`,
+   so a row's percentages across one analog column sum to 100%.
+5. The colormap's color intensity is that same `contribution_i` value —
+   darker green = that dimension explains more of why this particular
+   analog was selected.
+
+**Factor selection** (`FactorPicker.tsx`) goes down to the individual
+factor, not just the theme: expanding a theme row reveals every factor in
+it with a checkbox, so a query can be scoped to e.g. just `cpi_headline`
+and `ust_10y` — no theme required. A theme's header checkbox is a shortcut
+that selects/deselects every factor in it at once (tri-state: shows
+"— N selected" when only some of a theme's factors are checked).
+
+**Row names are human-readable, not raw column keys.** `AnalogColormap.tsx`
+renders e.g. "CPI (headline) — YoY %" instead of `cpi_headline__yoy`,
+built by looking up the factor's `FactorSpec.name` (fetched once via
+`GET /api/regime/factors`) and mapping the transform suffix through a small
+`TRANSFORM_LABELS` table (`yoy → "YoY %"`, `mom → "1M chg"`, etc.).
+
+**Merged rows expand.** Clicking a `"N factors merged"` row reveals one
+sub-row per original factor, using `analog.member_contributions[group][member]`
+— computed in `find_analogs_from_zscore` from the **pre-merge** z-scores:
+`member_share = (q_z[m] - c_z[m])² / Σ_{m'∈group} (q_z[m'] - c_z[m'])²`.
+This is a genuinely separate metric from the group's own `contribution_i`
+above, not a decomposition of it — the group's score comes from the
+*averaged* z-score (`build_vector_frame`), which doesn't split linearly
+into its members' individual squared differences. It answers "which member
+moved the most," not "how much did each contribute to the official
+percentage." The expanded sub-rows are rendered at reduced color intensity
+to visually distinguish them from the primary metric.
+
+**Caveat:** contributions are relative *within* one analog's own distance
+breakdown, not comparable in absolute terms across analogs with very
+different total distances (a small contribution to a large distance and a
+large contribution to a small distance aren't the same magnitude of
+"similarity driven by this factor").
+
+### 7.2 Event-time overlay chart
+
+**What it shows:** SPY (SPX proxy) % return, re-based to 0% at each date
+(±104 weeks around each date = the query or analog date; the query only
+gets the trailing 104 weeks, since "today" has no future).
+
+**Computed by:** `regime.py`'s `_event_series()` helper (deliberately kept
+in the dashboard router, not `similarity_engine.py` — presentation shaping,
+not research logic).
+
+```python
+window = price[(price.index >= center - 104wk) & (price.index <= center + 104wk)]
+base = window.loc[center]
+return_pct(t) = (price(t) / base - 1.0) * 100   # % return relative to the center date
+```
+
+The ±104-week (~2 year) window is fetched generously wide **so the frontend
+never needs a second round trip to zoom out** — `EventTimeOverlay.tsx` does
+all range adjustment client-side against this one payload:
+- **Scroll / trackpad pinch to zoom, centered on the cursor** — the primary
+  interaction, directly inside the chart (matches native browser/map
+  zoom conventions; a Mac trackpad pinch reports as a wheel event). Attached
+  as a native `addEventListener("wheel", ..., {passive: false})` in a
+  `useEffect`, not React's `onWheel` — React's synthetic wheel handler is
+  passive by default, so `preventDefault()` inside it is silently ignored
+  and the page would scroll underneath the chart at the same time. The
+  handler reads the current domain via a ref (`domainRef`) rather than a
+  dependency array, so it always sees the latest zoom state without
+  needing to re-attach the listener on every tick. Each tick scales the
+  visible span by a fixed factor (`ZOOM_STEP = 0.88`) around the data value
+  under the cursor, clamped to `[MIN_SPAN_WEEKS, full range]`.
+- **Explicit numeric range, applied only on demand.** The "x-min" / "x-max"
+  week inputs next to the chart title do **not** apply as you type or on
+  blur — typing a new value only updates the input's own displayed text.
+  The domain only changes when the adjacent **Set** button is clicked. This
+  is a deliberate behavior choice (the opposite of the `k` field elsewhere
+  on the page, which *does* apply on blur) — the two fields sit right next
+  to a live chart the user is actively scroll-zooming, so an implicit
+  apply-on-blur would be surprising there. "reset" (back to the default
+  ±26-week view) and "zoom out full" (the entire fetched ±104-week range)
+  remain one-click shortcuts.
+- A new query result resets the view to the default ±26-week window rather
+  than keeping a stale zoom range from the previous query.
+
+Every line is independently re-based to its own center date (`offset_weeks
+= 0`), so all lines are comparable in the same units regardless of what the
+underlying SPY price level actually was on those very different historical
+dates.
+
+### 7.3 Forward-return fan chart
+
+**What it shows:** the actual SPY return that followed each analog date, at
+1/3/6/12-month horizons — a grouped bar per analog, one bar cluster per
+horizon.
+
+**Computed by:** `regime.py`'s `_forward_returns()` helper, reusing the same
+horizon definitions as `validation.DEFAULT_HORIZONS_WEEKS` (4/13/26/52
+weeks) so the dashboard's forward-return chart and the opt-in validation
+test are always looking at identical time windows.
+
+```python
+forward_return(date, horizon_weeks) = price(date + horizon_weeks) / price(date) - 1.0
+```
+
+`None` (rendered as a gap, not zero) when the target date falls outside the
+dataset's range — e.g. very recent analogs don't yet have a 12-month
+forward return.
+
+**Similarity-weighted average, shown as a number per horizon** (e.g. "1m
++2.96%  3m +0.30%  6m +8.24%  12m +13.55%") above the chart, plus a green
+`ReferenceDot` marker on the chart itself. Computed entirely client-side in
+`ForwardReturnFanChart.tsx` (`similarityWeightedAverage()`) — no backend
+change needed, since `analogs` already carries each one's `distance` and
+`forward_returns`:
+
+```
+weight_i        = 1 / (distance_i + 1e-6)          # inverse-distance
+weighted_avg_h  = Σ(weight_i * return_i) / Σ(weight_i)   # over analogs with a non-null return at horizon h
+```
+
+Inverse-distance weighting (not the `1 - distance/maxDistance` scheme used
+for the similarity-ranking bars in §7.0) was chosen specifically because it
+never assigns zero weight — the linear scheme would zero out the single
+least-similar analog entirely, and degenerates to `0/0` when only one
+analog is returned (`k=1`). Analogs with no data at a given horizon are
+excluded from both the numerator and denominator for that horizon only.
+
+**Bar order is user-selectable** (`sort: similarity` / `sort: time` toggle,
+`ToggleGroup`) — `similarity` is the order `analogs` already arrives in
+(ascending distance); `time` re-sorts a copy by date ascending. **Bar
+colors stay fixed per analog date** across both modes (assigned once from
+the original similarity-ordered array via a `colorByDate` map), so a given
+historical date is always the same color whichever way it's sorted.
+
+*Implementation note:* the `<ResponsiveContainer>` is keyed on `sortMode`
+(`key={sortMode}`), forcing a full remount on toggle. Without it, recharts
+was observed to keep rendering bars/legend in whatever order they first
+mounted in, even after the underlying `<Bar>` children's array order
+changed on a later render — reordering existing keyed children isn't
+picked up reliably, only a fresh mount was. Verified directly (not just
+visually): read each `<Bar>` group's rendered `fill` color in DOM order
+before/after toggling, confirmed it now matches the expected per-mode
+order both ways.
+
+**This is retrieval, not a forecast** (see §Goal) — it shows what literally
+happened after that historical date, nothing more.
+
+### 7.4 Validation panel (opt-in)
+
+**What it shows:** whether the analogs just retrieved carry statistically
+meaningful forward-return information, checked two ways.
+
+**"Run KS test"** → `validation.run_validation()`:
+1. Publication-lag-adjusts every factor (`build_pub_lag_adjusted` — shifts
+   each column by `ceil(pub_lag_days / 7)` weeks) so nothing is used before
+   it would actually have been public.
+2. Samples one query date every 4 weeks across all eligible history and
+   calls `find_analogs_from_zscore()` at each (sliced to `date ≤ query`
+   only — no look-ahead, see §Phase 2).
+3. Pools every (query, analog) pair's forward return per horizon — this is
+   the "pooled" number — and separately pools only the *unique* analog
+   dates ever selected, since adjacent queries reuse most of the same
+   analogs (the pseudo-replication issue found in Phase 2).
+4. Runs `scipy.stats.ks_2samp(conditioned_returns, unconditional_returns)`
+   for both pools at each horizon. **The panel displays the unique-date
+   numbers** — trust those; the pooled ones are shown next to them mainly
+   as the "before" picture of that bug.
+
+**"Run sensitivity sweep"** → `validation.sensitivity_sweep()`: re-runs the
+unique-date KS test across a k × exclusion-window grid (k ∈ {3,5,10,15},
+exclusion ∈ {13,26,52} weeks) at the 3-month horizon, reusing the same
+z-scored frame across all 12 cells so only the backtest loop re-runs, not
+the data prep. Answers "is this result a property of one arbitrary setting,
+or does it hold generally?"
+
+Neither call ever fires automatically — see `ValidationPanel.tsx`, which
+renders nothing until the user clicks one of the two buttons.
+
+### 7.5 Where the raw numbers come from before any of the above
+
+Every output above starts from `data/factors_weekly.parquet` (Phase 0) and
+the transform layer in `similarity_engine.TRANSFORM_FUNCS`:
+
+| Transform | Formula | Used for |
+|---|---|---|
+| `level` | raw value | stationary series (yields, spreads, ratios) |
+| `yoy` | `value.pct_change(52) * 100` | index-like series (CPI, PPI, PCE, M2) |
+| `mom` | `value.diff(4)` | short-term change, absolute (bp/pp) for rate-like series |
+| `log_level` | `log(value)` | right-skewed series (VIX) |
+| `ma4` | `value.rolling(4).mean()` | smoothing high-frequency noise (jobless claims) |
+
+Which transform(s) apply to which factor is declared once, per factor, in
+`factor_schema.FACTORS` — adding a new factor there is the only change
+needed for it to flow through every output in this section automatically.

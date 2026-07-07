@@ -34,12 +34,44 @@ npm run dev
 
 ### 2. Backend
 
+**Use `backend/run_backend.sh` to start uvicorn — do not run a bare
+`uvicorn`/`python` command.** If this machine has `conda init` in its shell
+rc file (common on macOS with anaconda installed), *every new terminal*
+auto-activates the anaconda `base` env and puts it ahead of everything else
+in `PATH` — so a bare `uvicorn` silently resolves to conda's install
+instead of this project's `.venv`, **even after `cd`-ing into the project**.
+Conda's `pyarrow` is typically older than the one that wrote
+`Market Regime/data/factors_weekly.parquet`, so reading it then fails with
+`OSError: Repetition level histogram size mismatch` — surfaced in the
+browser as a `TypeError`/"load failed" on the Market Regime page.
+`run_backend.sh` sidesteps this entirely by calling the venv's Python by
+absolute path, so it's correct regardless of shell/conda state.
+
 ```bash
 cd "Consulting Dashboard"
+python3 -m venv ../.venv          # skip if you already created one at the repo root
+source ../.venv/bin/activate      # only needed for this one-time pip install
 pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload --port 8000
+deactivate
+
+./backend/run_backend.sh          # always uses ../.venv — every time, no activation needed
 # → http://localhost:8000
 ```
+
+If you still hit that `OSError` after switching to `run_backend.sh`:
+confirm nothing is running the old way — `ps aux | grep uvicorn` should
+show `.venv/bin/python3`, not `/opt/anaconda3/bin/python`. Kill any
+anaconda-launched instance and restart via the script.
+
+**If the Market Regime page starts empty/stuck on "Loading factors…" the
+very first time you open it:** this is expected to self-heal within ~60s if
+the frontend happened to load before the backend finished its (pandas/
+numpy/scipy-import-heavy) cold start — `regime/page.tsx` retries the
+factors fetch automatically every 2s for up to a minute, with no reload
+needed. If it's still stuck after that, the backend genuinely isn't
+reachable — check it's actually running (`curl localhost:8000/health`)
+before assuming it's a frontend bug; a "retry" button also appears next to
+the error once the auto-retry window gives up.
 
 ### 3. LLM Setup
 
