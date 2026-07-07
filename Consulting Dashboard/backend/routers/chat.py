@@ -138,11 +138,24 @@ async def _event_stream(req: ChatRequest) -> AsyncGenerator[str, None]:
                 yield f"data: {payload}\n\n"
         draft = "".join(draft_parts)
 
+        # `done` fires as soon as the draft itself is finished — this is
+        # what un-blocks the chat input on the frontend (see
+        # ChatPanel.tsx's onDone). Critique/revision below can take several
+        # seconds (a reasoning-enabled critic model on a free tier, plus a
+        # possible second full generation call), and none of that should
+        # hold the user's ability to keep chatting hostage. Previously
+        # `done` was yielded at the very end of this function, so
+        # "verifying" silently blocked the UI for the whole critique cycle
+        # instead of actually running in the background as intended.
+        paper_refs = [req.paper_context.arxiv_id] if req.paper_context else []
+        yield f"data: {json.dumps({'type': 'done', 'paper_refs': paper_refs})}\n\n"
+
         # Critic pass (opt-in — only runs if the frontend supplied an
-        # OpenRouter key). Draft already finished streaming to the client
-        # at this point; verification happens in the background and the
-        # result is reported as follow-up SSE events on this same
-        # connection, not a separate request. See
+        # OpenRouter key). Everything below streams as trailing SSE events
+        # on this same connection after `done` — the connection stays open
+        # (the frontend's reader loop only exits on the underlying fetch
+        # stream closing, not on any particular app-level event) so this
+        # doesn't require a second request. See
         # `Consulting Dashboard/CLAUDE.md` for the design rationale.
         if req.critic_api_key and draft.strip():
             yield f"data: {json.dumps({'type': 'verifying'})}\n\n"
@@ -159,7 +172,10 @@ async def _event_stream(req: ChatRequest) -> AsyncGenerator[str, None]:
                         {"role": "user", "content": (
                             "A reviewer found issues with your answer above. "
                             "Provide a corrected, complete replacement answer "
-                            "that fixes them:\n"
+                            "that fixes them. Keep following any format/section "
+                            "requirements from your original instructions "
+                            "(exact headers, order, tables, etc.) — fix the "
+                            "issues without dropping the required structure:\n"
                             + "\n".join(f"- {i}" for i in verdict["issues"])
                         )},
                     ]
@@ -182,9 +198,6 @@ async def _event_stream(req: ChatRequest) -> AsyncGenerator[str, None]:
                     yield f"data: {json.dumps({'type': 'verified'})}\n\n"
             else:
                 yield f"data: {json.dumps({'type': 'verified'})}\n\n"
-
-        paper_refs = [req.paper_context.arxiv_id] if req.paper_context else []
-        yield f"data: {json.dumps({'type': 'done', 'paper_refs': paper_refs})}\n\n"
 
     except ValueError as e:
         yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

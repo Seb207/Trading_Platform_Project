@@ -33,8 +33,9 @@ Check for:
 2. Any claim, number, formula, or citation in the draft that is NOT supported by the CONTEXT provided (possible hallucination)?
 3. Internal inconsistency (e.g. contradicts itself, or contradicts the CONTEXT).
 4. Vague hand-waving where the CONTEXT would have supported a specific, concrete answer.
+5. If the CONTEXT specifies a required output format (e.g. exact section headers, a required order, a required structure like "one table per method" or "one card per option"), does the draft actually follow it? Flag any required section that is missing, renamed, reordered, or merged with another, and any structural requirement (tables, per-item cards, etc.) that was ignored.
 
-Do NOT penalize style, length, or tone. Only flag substantive correctness/grounding issues.
+Do NOT penalize style, length, or tone. Only flag substantive correctness/grounding/format-compliance issues.
 
 Respond with ONLY a JSON object and nothing else — no markdown fences, no commentary:
 {"verdict": "pass", "issues": []}
@@ -51,7 +52,14 @@ async def critique(context: str, draft: str, api_key: str) -> dict:
     raises on a malformed critic response — falls back to "pass" so a
     critic-side parsing bug can't block the user's actual answer.
     """
-    provider = OpenRouterProvider(api_key=api_key, model=CRITIC_MODEL, temperature=0.0)
+    # reasoning_effort="low": the critic model runs with reasoning enabled
+    # by default, which was the main source of "verifying takes forever" —
+    # a compliance/grounding check doesn't need deep multi-step reasoning,
+    # and cutting the hidden thinking-token budget is the single biggest
+    # lever on critique latency.
+    provider = OpenRouterProvider(
+        api_key=api_key, model=CRITIC_MODEL, temperature=0.0, reasoning_effort="low",
+    )
     user_msg = (
         f"CONTEXT the assistant was given:\n{context[:_CONTEXT_CHAR_CAP]}\n\n"
         f"DRAFT ANSWER to review:\n{draft}"

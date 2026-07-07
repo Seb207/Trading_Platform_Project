@@ -102,6 +102,24 @@ Key design choices worth preserving:
   costs at least one extra request (two if revision triggers), so this adds
   up fast under real usage — fine for prototyping, but flag this if the
   feature moves toward production use.
+- **`done` must fire before critique, not after.** The frontend's `streaming`
+  state (which disables the chat input) only flips off on the `done` event.
+  `_event_stream` originally yielded `done` at the very end, after the full
+  critique/revision cycle — this silently blocked the user from sending
+  another message for the entire verification window, defeating the point
+  of running it "in the background." Fixed by yielding `done` immediately
+  after the draft finishes; `verifying`/`verified`/`revised` are trailing
+  events on the same still-open connection afterward. Any future addition
+  to this stream must preserve that ordering — `done` = "you can act again",
+  not "everything about this turn is finished".
+- **Reasoning-enabled free models are slow for a task like this.** The
+  critic model runs with reasoning enabled by default, which burns a lot of
+  hidden thinking tokens before its visible JSON verdict — real added
+  latency for a compliance/grounding check that doesn't need deep
+  multi-step reasoning. `OpenRouterProvider` now takes an optional
+  `reasoning_effort` param (maps to OpenRouter's unified `reasoning.effort`);
+  the critic call sets it to `"low"`. Left unset for normal chat generation
+  so a user's chosen model keeps its own default behavior.
 
 ## Verifying changes here
 
