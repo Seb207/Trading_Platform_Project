@@ -1,3 +1,4 @@
+import Badge from "@/components/ui/Badge";
 import type { ChatMessage as ChatMessageType } from "@/lib/types";
 
 // ── Simple markdown-ish renderer (no external deps) ───────────────────
@@ -115,6 +116,18 @@ export default function ChatMessage({ message }: ChatMessageProps) {
         </span>
       </div>
 
+      {/* Revision header — this message is a critic-driven replacement */}
+      {message.revisionOf && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Badge variant="pink">revised after review</Badge>
+          {message.revisionIssues?.map((issue, i) => (
+            <span key={i} className="font-mono text-[9px] text-text-dim">
+              · {issue}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Bubble */}
       <div
         className={[
@@ -127,6 +140,21 @@ export default function ChatMessage({ message }: ChatMessageProps) {
       >
         {renderContent(message.content)}
       </div>
+
+      {/* Critic status — only on the original draft message */}
+      {message.verification && !message.revisionOf && (
+        <div className="flex items-center gap-1.5">
+          {message.verification === "verifying" && (
+            <Badge variant="dim" className="animate-pulse">verifying…</Badge>
+          )}
+          {message.verification === "verified" && (
+            <Badge variant="green">✓ verified</Badge>
+          )}
+          {message.verification === "revised" && (
+            <Badge variant="gold">revised below</Badge>
+          )}
+        </div>
+      )}
 
       {/* Paper refs */}
       {message.paperRefs && message.paperRefs.length > 0 && (

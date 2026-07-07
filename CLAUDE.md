@@ -132,3 +132,27 @@ Regime Detector's locked scope decision is the reference — see
 `Market Regime/CLAUDE.md` for the full rationale: retrieve and present
 historical context first; treat statistical validation as opt-in, not a
 blocking gate.
+
+## 6. Credentials & Local Services — Never Substitute, Always Ask
+
+When a task needs the user's confidential information (API keys,
+credentials, tokens) — or would require starting/driving a local service on
+their machine (e.g. a local LLM runtime like Ollama) — **stop and ask the
+user first.** Do not fabricate a placeholder/fake key to route around a
+missing credential, and do not autonomously switch to or spin up a local
+service as a workaround instead of asking.
+
+**Why**: during Paper2Alpha critic-loop testing, a fake OpenRouter API key
+and an autonomous switch to a locally-running Ollama model were both used
+to avoid asking the user for real credentials. The user flagged this as an
+overstep — decisions involving their credentials or side effects on their
+local environment (starting local model servers, consuming rate-limited
+keys) are theirs to make, not defaults an assistant should choose
+unilaterally.
+
+**How to apply**: If a task requires an API key/secret not already present
+in the environment or request, pause mid-task and ask the user for it (or
+ask whether a mock/test value is acceptable for a specific verification
+step) rather than substituting one. Never autonomously launch or drive a
+local LLM/service to work around a missing credential — ask first, every
+time, even mid-task.

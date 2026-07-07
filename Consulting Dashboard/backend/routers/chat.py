@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.modules.llm.factory import get_provider
+from backend.modules.llm.critic import critique
 from backend.modules.llm.prompt_loader import (
     list_task_prompts,
     load_prompt_fragments,
@@ -42,6 +43,7 @@ class ChatRequest(BaseModel):
     messages:   list[MessageItem]
     paper_context: Optional[PaperContext] = None
     task:       str = ""                   # task-mode id (prompts/tasks/<id>.md); "" = none
+    critic_api_key: str = ""               # OpenRouter key for the critic pass; "" = skip critique
 
 
 # ── System prompt builder ───────────────────────────────────────────────
@@ -128,10 +130,58 @@ async def _event_stream(req: ChatRequest) -> AsyncGenerator[str, None]:
         system   = _build_system(req)
         messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
+        draft_parts: list[str] = []
         async for chunk in provider.stream(messages, system):
             if chunk:
+                draft_parts.append(chunk)
                 payload = json.dumps({"type": "chunk", "content": chunk})
                 yield f"data: {payload}\n\n"
+        draft = "".join(draft_parts)
+
+        # Critic pass (opt-in — only runs if the frontend supplied an
+        # OpenRouter key). Draft already finished streaming to the client
+        # at this point; verification happens in the background and the
+        # result is reported as follow-up SSE events on this same
+        # connection, not a separate request. See
+        # `Consulting Dashboard/CLAUDE.md` for the design rationale.
+        if req.critic_api_key and draft.strip():
+            yield f"data: {json.dumps({'type': 'verifying'})}\n\n"
+            try:
+                verdict = await critique(system, draft, req.critic_api_key)
+            except Exception:
+                verdict = {"verdict": "pass", "issues": []}
+
+            if verdict["verdict"] == "revise" and verdict["issues"]:
+                revised = ""
+                try:
+                    revision_messages = messages + [
+                        {"role": "assistant", "content": draft},
+                        {"role": "user", "content": (
+                            "A reviewer found issues with your answer above. "
+                            "Provide a corrected, complete replacement answer "
+                            "that fixes them:\n"
+                            + "\n".join(f"- {i}" for i in verdict["issues"])
+                        )},
+                    ]
+                    revised_parts: list[str] = []
+                    async for chunk in provider.stream(revision_messages, system):
+                        if chunk:
+                            revised_parts.append(chunk)
+                    revised = "".join(revised_parts)
+                except Exception:
+                    revised = ""
+
+                if revised.strip():
+                    payload = json.dumps({
+                        "type":   "revised",
+                        "content": revised,
+                        "issues":  verdict["issues"],
+                    })
+                    yield f"data: {payload}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'verified'})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'verified'})}\n\n"
 
         paper_refs = [req.paper_context.arxiv_id] if req.paper_context else []
         yield f"data: {json.dumps({'type': 'done', 'paper_refs': paper_refs})}\n\n"

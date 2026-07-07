@@ -42,6 +42,8 @@ export interface LLMConfig {
   openRouterApiKey?: string;  // OpenRouter only
 }
 
+export type CriticVerification = "verifying" | "verified" | "revised";
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -49,6 +51,9 @@ export interface ChatMessage {
   timestamp: Date;
   paperRefs?: string[];    // arxiv_ids cited
   modelName?: string;      // e.g. "claude-opus-4-5" or "gemma4:latest"
+  verification?: CriticVerification;  // critic status of this draft (assistant messages only)
+  revisionOf?: string;     // set on a critic-driven replacement message: id of the draft it revises
+  revisionIssues?: string[]; // issues the critic flagged (only present on revision messages)
 }
 
 // ── API responses ──────────────────────────────────────────────────────

@@ -70,6 +70,39 @@ actually ran) is the first thing to check, not the code you just changed.
   too short against a pandas/numpy/scipy cold import and had to be extended
   to 30×2s. See `src/app/regime/page.tsx`'s factors-loading effect.
 
+## Critic loop pattern (Paper2Alpha `/api/chat`)
+
+`backend/routers/chat.py` runs a post-hoc critique pass after the primary
+model's draft finishes streaming: `backend/modules/llm/critic.py` sends the
+draft + system context to a **fixed, independent OpenRouter model**
+(currently `nvidia/nemotron-3-ultra-550b-a55b:free`) for review, and if it
+flags issues, the primary model gets one revision pass. The result is
+reported as follow-up SSE events (`verifying` → `verified` or `revised`) on
+the *same* connection the draft streamed on — no job queue, no polling, no
+second request. `ChatPanel.tsx`/`ChatMessage.tsx` render these as a status
+badge on the draft, and (if revised) a new assistant message rather than an
+overwrite, so the user can see what changed.
+
+**Reuse this pattern** for any future "verify a generated answer" feature
+in this codebase instead of inventing a new transport — extend the SSE
+event vocabulary on the existing stream rather than adding endpoints/polling.
+
+Key design choices worth preserving:
+- **Critique never blocks the primary answer.** A malformed critic response
+  or a bad/missing API key fails open to `"pass"` (see
+  `critic.py::_parse_verdict` and the try/except around `critique()` in
+  `chat.py`) — verified live by sending a deliberately invalid OpenRouter
+  key and confirming the flow still completes with a `verified` event
+  rather than hanging or erroring.
+- **The critic model is fixed, independent of the user's generation
+  choice.** The same model grading its own answer tends to rubber-stamp its
+  own mistakes.
+- **Free-tier caveat**: OpenRouter's free models are rate-limited (~50
+  req/day per key as of 2026-07). Every chat turn with a critic key set
+  costs at least one extra request (two if revision triggers), so this adds
+  up fast under real usage — fine for prototyping, but flag this if the
+  feature moves toward production use.
+
 ## Verifying changes here
 
 Always use the `verify-ui-change` skill (`../.claude/skills/verify-ui-change/`)

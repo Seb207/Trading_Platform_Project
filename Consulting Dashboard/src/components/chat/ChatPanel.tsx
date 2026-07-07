@@ -129,9 +129,12 @@ async function streamChat(
   paperContext: { arxiv_id: string; relative_path: string } | null,
   contentLevel: "abstract" | "full",
   task: string,
-  onChunk: (chunk: string) => void,
-  onDone:  (paperRefs: string[]) => void,
-  onError: (msg: string) => void,
+  onChunk:     (chunk: string) => void,
+  onVerifying: () => void,
+  onVerified:  () => void,
+  onRevised:   (content: string, issues: string[]) => void,
+  onDone:      (paperRefs: string[]) => void,
+  onError:     (msg: string) => void,
 ) {
   const body = {
     provider:   config.provider,
@@ -145,6 +148,11 @@ async function streamChat(
       ? { arxiv_id: paperContext.arxiv_id, relative_path: paperContext.relative_path, content_level: contentLevel }
       : null,
     task,
+    // Reused regardless of which provider is generating the answer — the
+    // critic always runs on a fixed free OpenRouter model, independent of
+    // the user's generation choice. Empty string = critique is skipped
+    // server-side (no OpenRouter key configured yet).
+    critic_api_key: config.openRouterApiKey ?? "",
   };
 
   let response: Response;
@@ -180,9 +188,12 @@ async function streamChat(
       if (!line.startsWith("data: ")) continue;
       try {
         const data = JSON.parse(line.slice(6));
-        if (data.type === "chunk") onChunk(data.content);
-        if (data.type === "done")  onDone(data.paper_refs ?? []);
-        if (data.type === "error") onError(data.message);
+        if (data.type === "chunk")     onChunk(data.content);
+        if (data.type === "verifying") onVerifying();
+        if (data.type === "verified")  onVerified();
+        if (data.type === "revised")   onRevised(data.content, data.issues ?? []);
+        if (data.type === "done")      onDone(data.paper_refs ?? []);
+        if (data.type === "error")     onError(data.message);
       } catch { /* ignore malformed SSE */ }
     }
   }
@@ -302,6 +313,41 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
             m.id === assistantId ? { ...m, content: m.content + chunk } : m,
           ),
         );
+      },
+      // onVerifying — draft finished streaming, critic is now reviewing it
+      () => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, verification: "verifying" } : m,
+          ),
+        );
+      },
+      // onVerified — critic passed the draft as-is
+      () => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, verification: "verified" } : m,
+          ),
+        );
+      },
+      // onRevised — critic flagged issues; a corrected answer is appended
+      // as a new message rather than overwriting the draft, so the user can
+      // see what changed.
+      (content, issues) => {
+        setMessages((prev) => [
+          ...prev.map((m) =>
+            m.id === assistantId ? { ...m, verification: "revised" as const } : m,
+          ),
+          {
+            id:             crypto.randomUUID(),
+            role:           "assistant" as const,
+            content,
+            timestamp:      new Date(),
+            modelName:      config.model,
+            revisionOf:     assistantId,
+            revisionIssues: issues,
+          },
+        ]);
       },
       // onDone
       (paperRefs) => {
