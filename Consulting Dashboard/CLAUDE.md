@@ -121,6 +121,55 @@ Key design choices worth preserving:
   the critic call sets it to `"low"`. Left unset for normal chat generation
   so a user's chosen model keeps its own default behavior.
 
+## Chat state must live above the page, not inside it
+
+`ChatPanel.tsx` is only mounted while the user is on `/research` — the App
+Router fully unmounts it when navigating to any other route (`/regime`,
+`/portfolio`, etc.), since each route's page component renders inside
+`{children}` in the root layout. If `messages`/`streaming` are local
+`useState` in `ChatPanel`, navigating away mid-conversation (even mid-stream)
+destroys them — the in-flight generation continues on the server, but
+nothing is listening for the result anymore by the time it arrives.
+
+Fixed by lifting `messages`, `streaming`, and the send/stream logic into
+`src/context/ChatContext.tsx` (`ChatProvider`/`useChat()`), mounted once in
+`src/app/layout.tsx` alongside the existing `LLMProvider` — same pattern,
+same reason. `ChatPanel` now just reads from `useChat()`; it can unmount and
+remount freely (navigating away and back) without losing the conversation
+or an in-progress answer. Also switched `ChatPanel`'s local `config` state
+to the already-existing `useLLM()` context for the same reason — it existed
+specifically for this but `ChatPanel` wasn't using it, so the model/provider
+selection was silently reset on every remount too.
+
+**Rule of thumb**: any state that represents "work in progress" (not just
+UI-only state like an accordion's open/closed sections) belongs in a
+context mounted at the layout level if the component holding it can be
+unmounted by route navigation — not in the component's own `useState`.
+
+Verified by sending a message on Ollama, navigating to `/regime` mid-stream,
+and navigating back to `/research` — the full question + completed answer
+were still there, input was correctly re-enabled once generation finished.
+
+## Client disconnect (refresh/tab close) safely cancels the LLM call
+
+Reviewed whether a hard interrupt (page refresh, tab close) leaves the
+backend generating a response for a client that's no longer there — wasting
+LLM API calls/tokens on an abandoned request. Verified empirically: a fake
+slow-streaming provider monkeypatched into a throwaway instance of the real
+app, hit with a real client that disconnects mid-stream, showed the
+generator receiving `asyncio.CancelledError` and its `finally` block running
+immediately, with zero further chunks generated after disconnect. This is
+Starlette's built-in `StreamingResponse` behavior (a background task listens
+for the ASGI `http.disconnect` message and cancels the task group running
+the generator) — confirmed present in this project's installed versions
+(fastapi 0.135.2 / starlette 1.0.0). None of our own `except Exception:`
+blocks in `chat.py`/`critic.py`/`openrouter_provider.py` catch
+`CancelledError` (it isn't an `Exception` subclass), so cancellation
+propagates cleanly through the critique/revision path too. **No code change
+was needed here** — this was a verification, not a fix. If this framework
+behavior is ever relied on elsewhere, don't add a broad `except Exception`
+around an entire streaming generator without re-checking this.
+
 ## Verifying changes here
 
 Always use the `verify-ui-change` skill (`../.claude/skills/verify-ui-change/`)

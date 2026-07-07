@@ -7,7 +7,9 @@ import ChatInput from "./ChatInput";
 import MarkdownRenderer from "@/components/research/MarkdownRenderer";
 import { analyzePaper } from "@/lib/api";
 import type { AnalyzeResult } from "@/lib/api";
-import type { ChatMessage as ChatMessageType, LLMConfig, Paper } from "@/lib/types";
+import { useChat } from "@/context/ChatContext";
+import { useLLM } from "@/context/LLMContext";
+import type { Paper } from "@/lib/types";
 
 type ChatTab = "chat" | "viewer" | "strategy";
 
@@ -122,96 +124,22 @@ const TABS: { id: ChatTab; label: string }[] = [
 
 const BASE_URL = "http://localhost:8000";
 
-// ── SSE streaming helper ───────────────────────────────────────────────
-async function streamChat(
-  config: LLMConfig,
-  messages: { role: string; content: string }[],
-  paperContext: { arxiv_id: string; relative_path: string } | null,
-  contentLevel: "abstract" | "full",
-  task: string,
-  onChunk:     (chunk: string) => void,
-  onVerifying: () => void,
-  onVerified:  () => void,
-  onRevised:   (content: string, issues: string[]) => void,
-  onDone:      (paperRefs: string[]) => void,
-  onError:     (msg: string) => void,
-) {
-  const body = {
-    provider:   config.provider,
-    model:      config.model,
-    api_key:    config.provider === "openrouter"
-      ? (config.openRouterApiKey ?? "")
-      : (config.apiKey ?? ""),
-    ollama_url: config.ollamaUrl ?? "http://localhost:11434",
-    messages,
-    paper_context: paperContext
-      ? { arxiv_id: paperContext.arxiv_id, relative_path: paperContext.relative_path, content_level: contentLevel }
-      : null,
-    task,
-    // Reused regardless of which provider is generating the answer — the
-    // critic always runs on a fixed free OpenRouter model, independent of
-    // the user's generation choice. Empty string = critique is skipped
-    // server-side (no OpenRouter key configured yet).
-    critic_api_key: config.openRouterApiKey ?? "",
-  };
-
-  let response: Response;
-  try {
-    response = await fetch(`${BASE_URL}/api/chat`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(body),
-    });
-  } catch {
-    onError("Backend unreachable — is FastAPI running on port 8000?");
-    return;
-  }
-
-  if (!response.ok || !response.body) {
-    onError(`API error ${response.status}`);
-    return;
-  }
-
-  const reader  = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer    = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";   // keep incomplete last line
-
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const data = JSON.parse(line.slice(6));
-        if (data.type === "chunk")     onChunk(data.content);
-        if (data.type === "verifying") onVerifying();
-        if (data.type === "verified")  onVerified();
-        if (data.type === "revised")   onRevised(data.content, data.issues ?? []);
-        if (data.type === "done")      onDone(data.paper_refs ?? []);
-        if (data.type === "error")     onError(data.message);
-      } catch { /* ignore malformed SSE */ }
-    }
-  }
-}
-
 // ── Component ──────────────────────────────────────────────────────────
 interface ChatPanelProps {
   selectedPaper: Paper | null;
 }
 
 export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
+  // messages/streaming/sendMessage live in ChatContext (mounted once at the
+  // root layout) instead of local state — this component unmounts whenever
+  // the user navigates away from /research, but the conversation and any
+  // in-flight generation must not be lost when that happens. Same reasoning
+  // for config: LLMContext already existed for this but ChatPanel wasn't
+  // using it, so the model/provider selection was silently reset on every
+  // remount too.
+  const { messages, streaming, sendMessage } = useChat();
+  const { config, setConfig } = useLLM();
   const [activeTab,    setActiveTab]    = useState<ChatTab>("chat");
-  const [messages,     setMessages]     = useState<ChatMessageType[]>([]);
-  const [streaming,    setStreaming]    = useState(false);
-  const [config,       setConfig]       = useState<LLMConfig>({
-    provider: "claude",
-    model:    "claude-opus-4-5",
-  });
   const [paperDetail,   setPaperDetail]   = useState<AnalyzeResult | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
   const [openSections,  setOpenSections]  = useState<Set<number>>(new Set());
@@ -249,7 +177,6 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
   const expandAll  = useCallback(() => setOpenSections(new Set(parsedSections.map((_, i) => i))), [parsedSections]);
   const collapseAll = useCallback(() => setOpenSections(new Set()), []);
   const bottomRef      = useRef<HTMLDivElement>(null);
-  const streamingIdRef = useRef<string | null>(null); // ID of the assistant message being built
 
   // Auto-scroll on new content
   useEffect(() => {
@@ -267,111 +194,15 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
   }, [activeTab, selectedPaper?.relative_path]);
 
   const handleSend = async (content: string) => {
-    if (streaming) return;
-
-    // Add user message
-    const userMsg: ChatMessageType = {
-      id:        crypto.randomUUID(),
-      role:      "user",
+    await sendMessage({
       content,
-      timestamp: new Date(),
-      paperRefs: selectedPaper ? [selectedPaper.arxiv_id] : [],
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setStreaming(true);
-
-    // Create empty assistant message (will be filled by stream)
-    const assistantId = crypto.randomUUID();
-    streamingIdRef.current = assistantId;
-    const assistantMsg: ChatMessageType = {
-      id:        assistantId,
-      role:      "assistant",
-      content:   "",
-      timestamp: new Date(),
-      modelName: config.model,
-    };
-    setMessages((prev) => [...prev, assistantMsg]);
-
-    // Build history for API (exclude the empty assistant message)
-    const history = [...messages, userMsg].map((m) => ({
-      role:    m.role,
-      content: m.content,
-    }));
-
-    await streamChat(
       config,
-      history,
-      selectedPaper
+      paperContext: selectedPaper
         ? { arxiv_id: selectedPaper.arxiv_id, relative_path: selectedPaper.relative_path ?? "" }
         : null,
       contentLevel,
       task,
-      // onChunk — append to streaming message
-      (chunk) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: m.content + chunk } : m,
-          ),
-        );
-      },
-      // onVerifying — draft finished streaming, critic is now reviewing it
-      () => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, verification: "verifying" } : m,
-          ),
-        );
-      },
-      // onVerified — critic passed the draft as-is
-      () => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, verification: "verified" } : m,
-          ),
-        );
-      },
-      // onRevised — critic flagged issues; a corrected answer is appended
-      // as a new message rather than overwriting the draft, so the user can
-      // see what changed.
-      (content, issues) => {
-        setMessages((prev) => [
-          ...prev.map((m) =>
-            m.id === assistantId ? { ...m, verification: "revised" as const } : m,
-          ),
-          {
-            id:             crypto.randomUUID(),
-            role:           "assistant" as const,
-            content,
-            timestamp:      new Date(),
-            modelName:      config.model,
-            revisionOf:     assistantId,
-            revisionIssues: issues,
-          },
-        ]);
-      },
-      // onDone
-      (paperRefs) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, paperRefs } : m,
-          ),
-        );
-        setStreaming(false);
-        streamingIdRef.current = null;
-      },
-      // onError
-      (errMsg) => {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `⚠️ ${errMsg}` }
-              : m,
-          ),
-        );
-        setStreaming(false);
-        streamingIdRef.current = null;
-      },
-    );
+    });
   };
 
   return (
@@ -488,7 +319,7 @@ export default function ChatPanel({ selectedPaper }: ChatPanelProps) {
             ))}
 
             {/* Streaming cursor */}
-            {streaming && streamingIdRef.current && (
+            {streaming && (
               <div className="flex items-center gap-1.5">
                 {[0, 1, 2].map((i) => (
                   <span

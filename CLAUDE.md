@@ -94,6 +94,21 @@ state. See the `restart-backend` skill. If a bug looks inconsistent across
 runs or mentions a package/version that contradicts a `requirements.txt`,
 check the interpreter first — see the `diagnose-env-mismatch` skill.
 
+**Known launch points that must resolve the venv explicitly, not bare
+`uvicorn`** (this list matters because the fix has to be applied at every
+entry point independently — fixing one doesn't fix the others):
+- `Consulting Dashboard/backend/run_backend.sh` — fixed.
+- `/Applications/Quant Dashboard.app/Contents/MacOS/launcher` — a
+  hand-built macOS app (plain bash script, `Contents/MacOS/launcher`) that
+  starts both servers and opens the browser. Its own `PATH` line explicitly
+  puts `/opt/anaconda3/bin` ahead of everything, so its original bare
+  `uvicorn backend.main:app --port 8000` hit the exact same conda/pyarrow
+  bug. Fixed the same way: resolves `$VENV_PYTHON` to the absolute `.venv`
+  path before launching, with a fallback + notification if the venv is
+  missing. Logs to `~/Library/Logs/QuantDashboard/backend.log`. If this
+  bug resurfaces from yet another launch point, apply the identical fix
+  there rather than only touching `run_backend.sh`.
+
 ## 3. Dependency Sync Rule (bridge modules)
 
 `Consulting Dashboard/backend/requirements.txt` must be manually kept in

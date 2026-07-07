@@ -44,6 +44,11 @@ initially looked like application bugs. See `CLAUDE.md` §2 for full history.
    hijack and the bug will resurface differently later, as it did twice
    already. Use `restart-backend`, which launches via
    `run_backend.sh`'s absolute venv path specifically to route around this.
+   If the backend wasn't started via `run_backend.sh` at all — e.g. it was
+   started by `/Applications/Quant Dashboard.app` (a hand-built launcher;
+   see `CLAUDE.md` §2 for its own venv fix) — check `ps aux` for how it was
+   actually invoked before assuming `run_backend.sh` is even the process
+   you're dealing with.
 4. **If it's confirmed to be the right environment** and the bug persists,
    only then move on to treating it as an actual code/logic bug.
 

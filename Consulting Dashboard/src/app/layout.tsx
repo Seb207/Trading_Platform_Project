@@ -4,6 +4,7 @@ import "./globals.css";
 import TopBar from "@/components/layout/TopBar";
 import CategoryNav from "@/components/layout/CategoryNav";
 import { LLMProvider } from "@/context/LLMContext";
+import { ChatProvider } from "@/context/ChatContext";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -36,11 +37,13 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} ${ibmPlexMono.variable} ${spaceGrotesk.variable} h-full`}>
       <body className="h-full flex flex-col bg-bg text-text antialiased">
         <LLMProvider>
-          <TopBar />
-          <CategoryNav />
-          <main className="flex flex-1 overflow-hidden">
-            {children}
-          </main>
+          <ChatProvider>
+            <TopBar />
+            <CategoryNav />
+            <main className="flex flex-1 overflow-hidden">
+              {children}
+            </main>
+          </ChatProvider>
         </LLMProvider>
       </body>
     </html>
