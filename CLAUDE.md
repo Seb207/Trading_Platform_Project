@@ -5,6 +5,18 @@ Claude Code. It is **not a static spec** — it is a living document. It holds
 only **cross-module** conventions and gotchas; module-specific detail lives
 in each module's own `CLAUDE.md` (linked in §1).
 
+## Tech Stack & Commands
+
+- **Consulting Dashboard**: Next.js 16 (App Router) + TypeScript + Tailwind,
+  FastAPI backend. `npm run dev` (frontend), `Consulting Dashboard/backend/run_backend.sh`
+  (backend — CRITICAL: never a bare `uvicorn`/`python3`, see §2).
+  `npm run lint` / `npm run build` for checks.
+- **Market Regime**: standalone Python (pandas/numpy/scipy/pyarrow), no
+  server. `python3 build_factor_dataset.py` to rebuild the dataset.
+- **Research_LLM**: standalone Python MCP server (separate git repo).
+  `python3 -m pytest tests/` for its test suite.
+- Full command/environment detail lives in each module's own `CLAUDE.md`.
+
 ## Maintenance Protocol (read this first)
 
 - After any session where you hit a bug, made a wrong assumption, discovered
@@ -87,7 +99,7 @@ This caused two separate incidents:
   correctly, at which point Paper2Alpha search broke with
   `"Phase 4 requires additional packages"`. Detail: `Research_LLM/CLAUDE.md`.
 
-**Fix**: never start the backend with a bare `uvicorn`/`python3` command. Use
+**CRITICAL — Fix**: never start the backend with a bare `uvicorn`/`python3` command. Use
 `Consulting Dashboard/backend/run_backend.sh`, which resolves the venv python
 by absolute path (`$DASHBOARD_DIR/../.venv/bin/python3`), immune to shell/conda
 state. See the `restart-backend` skill. If a bug looks inconsistent across
@@ -148,7 +160,7 @@ Regime Detector's locked scope decision is the reference — see
 historical context first; treat statistical validation as opt-in, not a
 blocking gate.
 
-## 6. Credentials & Local Services — Never Substitute, Always Ask
+## 6. CRITICAL — Credentials & Local Services — Never Substitute, Always Ask
 
 When a task needs the user's confidential information (API keys,
 credentials, tokens) — or would require starting/driving a local service on
@@ -171,3 +183,19 @@ ask whether a mock/test value is acceptable for a specific verification
 step) rather than substituting one. Never autonomously launch or drive a
 local LLM/service to work around a missing credential — ask first, every
 time, even mid-task.
+
+## 7. Harness Workflow
+
+For a feature large enough to warrant an explicit plan (not a quick fix),
+use `/harness` (`.claude/commands/harness.md`) — reads `docs/PRD.md`,
+`docs/ARCHITECTURE.md`, `docs/ADR.md`, breaks the feature into self-contained
+steps under `phases/<phase>/`, and drives them **semi-automated**: one step
+at a time, in conversation, with `python3 scripts/execute.py` handling
+status tracking and git branch/commit bookkeeping — not an unattended
+headless loop. Use `/review` (`.claude/commands/review.md`) before
+considering a branch done. `docs/UI_GUIDE.md` documents the dashboard's
+actual visual conventions — match it rather than introducing a new style.
+
+`Research_LLM/` (separate git repo) has its own parallel copy of this same
+structure (`docs/`, `phases/`, `scripts/execute.py`, `.claude/commands/`) —
+see its own `CLAUDE.md`.

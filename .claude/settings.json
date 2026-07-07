@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/stop_check.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'rm\\s+-rf|git\\s+push\\s+--force|git\\s+reset\\s+--hard|DROP\\s+TABLE'; then echo 'BLOCKED: dangerous command detected.' >&2; exit 1; fi; if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'uvicorn backend\\.main' && ! echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'run_backend\\.sh|\\.venv/bin/python'; then echo 'BLOCKED: bare uvicorn resolves to conda, not the project .venv (see CLAUDE.md sec 2). Use Consulting Dashboard/backend/run_backend.sh instead.' >&2; exit 1; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

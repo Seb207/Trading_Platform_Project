@@ -67,6 +67,29 @@ assuming it's a code bug — this machine's `~/.zshrc` auto-activates
 anaconda's `base` env ahead of any project `.venv` on PATH, so a bare
 `python3` command can silently run under the wrong interpreter.
 
+## CRITICAL — Credentials & Local Services — Never Substitute, Always Ask
+
+When a task needs confidential information (API keys, credentials, tokens)
+— or would require starting/driving a local service (e.g. a local LLM
+runtime) — **stop and ask the user first.** Do not fabricate a placeholder
+key to route around a missing credential, and do not autonomously spin up
+a local service as a workaround. (Duplicated here in full per this file's
+own self-sufficiency policy above — see the parent `CLAUDE.md` §6 for the
+incident this rule came from.)
+
+## Harness Workflow
+
+For a feature large enough to warrant an explicit plan, use `/harness`
+(`.claude/commands/harness.md`) — reads `docs/PRD.md`, `docs/ARCHITECTURE.md`,
+`docs/ADR.md`, breaks the feature into self-contained steps under
+`phases/<phase>/`, and drives them **semi-automated** (one step at a time,
+in conversation; `python3 scripts/execute.py` handles status tracking and
+git bookkeeping — not an unattended headless loop). Use `/review`
+(`.claude/commands/review.md`) before considering a branch done. This is a
+parallel, independent copy of the same structure set up in the parent
+`Trading_Platform_Project` repo — kept separate because this directory is
+its own git repo.
+
 ## arXiv API quirks
 
 - **Two hosts, throttle independently**: content (`arxiv.org/html`,
